@@ -180,6 +180,8 @@ export interface Idea {
   score_innovation: number | null;
   score_cost: number | null;
   score_time: number | null;
+  project_id: number | null;
+  cancel_reason: string | null;
   created_at: string;
 }
 
@@ -273,7 +275,48 @@ export const projectsApi = {
 export const transactionsApi = makeResource("transactions");
 export const eventsApi = makeResource("events");
 export const goalsApi = makeResource("goals");
-export const ideasApi = makeResource("ideas");
+export const ideasApi = {
+  ...makeResource<Idea>("ideas"),
+  async update(id: number, fields: Partial<Idea>) {
+    const res = await fetch(`/api/ideas/${id}`, {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ fields }),
+    });
+    return handleResponse(res);
+  },
+  async cancel(id: number, reason?: string) {
+    const res = await fetch(`/api/ideas/${id}`, {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ action: "cancel", reason }),
+    });
+    return handleResponse(res);
+  },
+  async reactivate(id: number) {
+    const res = await fetch(`/api/ideas/${id}`, {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ action: "reactivate" }),
+    });
+    return handleResponse(res);
+  },
+  async convertToProject(id: number) {
+    const res = await fetch(`/api/ideas/${id}`, {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ action: "convert-to-project" }),
+    });
+    return handleResponse(res);
+  },
+  async remove(id: number) {
+    const res = await fetch(`/api/ideas/${id}`, {
+      method: "DELETE",
+      headers: await authHeaders(),
+    });
+    await handleResponse(res);
+  },
+};
 export const articlesApi = makeResource("articles");
 export const platformsApi = makeResource("platforms");
 export const contentApi = makeResource("content");

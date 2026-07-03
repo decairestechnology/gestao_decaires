@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Search, Star, X, Lightbulb, Loader2 } from "lucide-react";
+import { Plus, Search, Star, X, Lightbulb, Loader2, Pencil, Trash2, Rocket, Ban, RotateCcw, ExternalLink } from "lucide-react";
 import { ideasApi, type Idea as ApiIdea } from "../../lib/api";
 
 const statusColors: Record<string, { bg: string; text: string }> = {
@@ -9,6 +9,7 @@ const statusColors: Record<string, { bg: string; text: string }> = {
   Aprovada: { bg: "#ECFDF5", text: "#065F46" },
   "Em desenvolvimento": { bg: "#EFF6FF", text: "#1D4ED8" },
   Arquivada: { bg: "#F1F5F9", text: "#475569" },
+  Cancelada: { bg: "#FEF2F2", text: "#991B1B" },
 };
 
 interface UiIdea {
@@ -23,6 +24,8 @@ interface UiIdea {
   complexity: string;
   target: string;
   status: string;
+  projectId: number | null;
+  cancelReason: string;
   scores: { viabilidade: number; comercial: number; inovacao: number; custo: number; tempo: number };
 }
 
@@ -39,6 +42,8 @@ function toUiIdea(i: ApiIdea): UiIdea {
     complexity: i.complexity ?? "—",
     target: i.target_audience ?? "—",
     status: i.status,
+    projectId: i.project_id,
+    cancelReason: i.cancel_reason ?? "",
     scores: {
       viabilidade: i.score_viability ?? 0,
       comercial: i.score_commercial ?? 0,
@@ -51,34 +56,54 @@ function toUiIdea(i: ApiIdea): UiIdea {
 
 const priorityColors: Record<string, string> = { Alta: "#EF4444", Média: "#F59E0B", Baixa: "#10B981" };
 
-function ScoreBar({ label, value }: { label: string; value: number }) {
+function ScoreBar({ label, value, onChange, saving }: { label: string; value: number; onChange?: (v: number) => void; saving?: boolean }) {
   return (
     <div>
       <div className="flex justify-between text-xs mb-1">
         <span style={{ color: "var(--muted-foreground)" }}>{label}</span>
-        <span className="font-semibold" style={{ color: "var(--foreground)" }}>{value}/5</span>
+        <span className="font-semibold flex items-center gap-1" style={{ color: "var(--foreground)" }}>
+          {saving && <Loader2 size={10} className="animate-spin" />}
+          {value}/5
+        </span>
       </div>
       <div className="flex gap-1">
         {[1, 2, 3, 4, 5].map((n) => (
-          <div key={n} className="flex-1 h-1.5 rounded-full" style={{ background: n <= value ? "var(--primary)" : "var(--muted)" }} />
+          <div
+            key={n}
+            onClick={onChange ? () => onChange(n) : undefined}
+            className="flex-1 h-1.5 rounded-full"
+            style={{
+              background: n <= value ? "var(--primary)" : "var(--muted)",
+              cursor: onChange ? "pointer" : "default",
+            }}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-const emptyForm = { title: "", category: "", target_audience: "", description: "", priority: "Média", revenue_potential: "Médio" };
+const emptyForm = { title: "", category: "", target_audience: "", description: "", priority: "Média", revenue_potential: "Médio", complexity: "Média" };
 
 export function Ideas() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("Todas");
   const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [selected, setSelected] = useState<UiIdea | null>(null);
   const [ideas, setIdeas] = useState<UiIdea[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [converting, setConverting] = useState(false);
+  const [savingScore, setSavingScore] = useState<string | null>(null);
+  const [showCancelBox, setShowCancelBox] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
+  const [reactivating, setReactivating] = useState(false);
 
   const loadIdeas = useCallback(async () => {
     setLoading(true);
@@ -97,18 +122,112 @@ export function Ideas() {
     loadIdeas();
   }, [loadIdeas]);
 
-  async function handleCreateIdea() {
+  async function handleSaveIdea() {
     if (!form.title.trim()) return;
     setSaving(true);
     try {
-      await ideasApi.create(form);
+      if (editingId) {
+        const updated = await ideasApi.update(editingId, form as any);
+        if (selected?.id === editingId) setSelected(toUiIdea(updated));
+      } else {
+        await ideasApi.create(form);
+      }
       setForm(emptyForm);
+      setEditingId(null);
       setShowModal(false);
       await loadIdeas();
     } catch (err: any) {
       setError(err?.message ?? "Não foi possível salvar a ideia.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  function openCreateModal() {
+    setEditingId(null);
+    setForm(emptyForm);
+    setShowModal(true);
+  }
+
+  function openEditModal(idea: UiIdea) {
+    setEditingId(idea.id);
+    setForm({
+      title: idea.title, category: idea.category, target_audience: idea.target,
+      description: idea.desc, priority: idea.priority, revenue_potential: idea.revenue,
+      complexity: idea.complexity,
+    });
+    setShowModal(true);
+  }
+
+  async function handleDeleteIdea() {
+    if (!selected) return;
+    setDeleting(true);
+    try {
+      await ideasApi.remove(selected.id);
+      setSelected(null);
+      setConfirmDelete(false);
+      await loadIdeas();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível excluir a ideia.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleConvertToProject() {
+    if (!selected) return;
+    setConverting(true);
+    try {
+      const updated = await ideasApi.convertToProject(selected.id);
+      setSelected(toUiIdea(updated));
+      await loadIdeas();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível enviar essa ideia pra projeto.");
+    } finally {
+      setConverting(false);
+    }
+  }
+
+  async function handleCancelIdea() {
+    if (!selected) return;
+    setCancelling(true);
+    try {
+      const updated = await ideasApi.cancel(selected.id, cancelReason.trim() || undefined);
+      setSelected(toUiIdea(updated));
+      setShowCancelBox(false);
+      setCancelReason("");
+      await loadIdeas();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível cancelar a ideia.");
+    } finally {
+      setCancelling(false);
+    }
+  }
+
+  async function handleReactivateIdea() {
+    if (!selected) return;
+    setReactivating(true);
+    try {
+      const updated = await ideasApi.reactivate(selected.id);
+      setSelected(toUiIdea(updated));
+      await loadIdeas();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível reativar a ideia.");
+    } finally {
+      setReactivating(false);
+    }
+  }
+
+  async function handleScoreChange(field: string, value: number) {
+    if (!selected) return;
+    setSavingScore(field);
+    try {
+      const updated = await ideasApi.update(selected.id, { [field]: value } as any);
+      setSelected(toUiIdea(updated));
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível salvar a avaliação.");
+    } finally {
+      setSavingScore(null);
     }
   }
 
@@ -137,7 +256,7 @@ export function Ideas() {
           style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}>
           {["Todas", ...Object.keys(statusColors)].map((s) => <option key={s}>{s}</option>)}
         </select>
-        <button onClick={() => setShowModal(true)}
+        <button onClick={openCreateModal}
           className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition hover:opacity-90"
           style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>
           <Plus size={14} />Nova ideia
@@ -149,7 +268,7 @@ export function Ideas() {
           const s = statusColors[idea.status] ?? { bg: "#F1F5F9", text: "#475569" };
           const avgScore = Math.round((idea.scores.viabilidade + idea.scores.comercial + idea.scores.inovacao) / 3 * 10) / 10;
           return (
-            <div key={idea.id} onClick={() => setSelected(idea)}
+            <div key={idea.id} onClick={() => { setSelected(idea); setConfirmDelete(false); setShowCancelBox(false); setCancelReason(""); }}
               className="rounded-xl border p-5 shadow-sm cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5"
               style={{ background: "var(--card)", borderColor: "var(--border)" }}>
               <div className="flex items-start justify-between mb-3">
@@ -186,8 +305,29 @@ export function Ideas() {
                 <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: statusColors[selected.status]?.bg, color: statusColors[selected.status]?.text }}>{selected.status}</span>
                 <h3 className="font-bold mt-1" style={{ color: "var(--foreground)" }}>{selected.title}</h3>
               </div>
-              <button onClick={() => setSelected(null)} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button onClick={() => openEditModal(selected)} title="Editar" className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "var(--muted-foreground)" }}>
+                  <Pencil size={14} />
+                </button>
+                <button onClick={() => setConfirmDelete(true)} title="Excluir" className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "#EF4444" }}>
+                  <Trash2 size={14} />
+                </button>
+                <button onClick={() => setSelected(null)} className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
+              </div>
             </div>
+
+            {confirmDelete && (
+              <div className="px-6 py-3 flex items-center justify-between gap-3" style={{ background: "#FEF2F2" }}>
+                <span className="text-xs font-medium" style={{ color: "#991B1B" }}>Excluir essa ideia? Não dá pra desfazer.</span>
+                <div className="flex gap-2 flex-shrink-0">
+                  <button onClick={() => setConfirmDelete(false)} className="text-xs px-3 py-1.5 rounded-lg font-semibold" style={{ background: "white", color: "var(--foreground)" }}>Cancelar</button>
+                  <button onClick={handleDeleteIdea} disabled={deleting} className="text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 disabled:opacity-60" style={{ background: "#EF4444", color: "white" }}>
+                    {deleting && <Loader2 size={11} className="animate-spin" />}
+                    Excluir
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="p-6 space-y-5">
               <p className="text-sm" style={{ color: "var(--muted-foreground)" }}>{selected.desc}</p>
               <div className="grid grid-cols-2 gap-3">
@@ -200,11 +340,77 @@ export function Ideas() {
               </div>
               <div className="space-y-3">
                 <div className="font-semibold text-sm" style={{ color: "var(--foreground)" }}>Avaliação</div>
-                <ScoreBar label="Viabilidade" value={selected.scores.viabilidade} />
-                <ScoreBar label="Potencial comercial" value={selected.scores.comercial} />
-                <ScoreBar label="Inovação" value={selected.scores.inovacao} />
-                <ScoreBar label="Custo estimado" value={selected.scores.custo} />
-                <ScoreBar label="Tempo de desenvolvimento" value={selected.scores.tempo} />
+                <p className="text-xs -mt-2" style={{ color: "var(--muted-foreground)" }}>Clique nas barras pra dar a nota.</p>
+                <ScoreBar label="Viabilidade" value={selected.scores.viabilidade} saving={savingScore === "score_viability"} onChange={(v) => handleScoreChange("score_viability", v)} />
+                <ScoreBar label="Potencial comercial" value={selected.scores.comercial} saving={savingScore === "score_commercial"} onChange={(v) => handleScoreChange("score_commercial", v)} />
+                <ScoreBar label="Inovação" value={selected.scores.inovacao} saving={savingScore === "score_innovation"} onChange={(v) => handleScoreChange("score_innovation", v)} />
+                <ScoreBar label="Custo estimado" value={selected.scores.custo} saving={savingScore === "score_cost"} onChange={(v) => handleScoreChange("score_cost", v)} />
+                <ScoreBar label="Tempo de desenvolvimento" value={selected.scores.tempo} saving={savingScore === "score_time"} onChange={(v) => handleScoreChange("score_time", v)} />
+              </div>
+
+              {selected.status === "Cancelada" && selected.cancelReason && (
+                <div className="rounded-lg p-3" style={{ background: "#FEF2F2" }}>
+                  <div className="text-xs mb-0.5" style={{ color: "#991B1B" }}>Motivo do cancelamento</div>
+                  <div className="text-sm" style={{ color: "#991B1B" }}>{selected.cancelReason}</div>
+                </div>
+              )}
+
+              {showCancelBox && (
+                <div className="rounded-lg p-3 space-y-2" style={{ background: "var(--muted)" }}>
+                  <label className="text-xs font-semibold" style={{ color: "var(--foreground)" }}>Motivo (opcional)</label>
+                  <textarea
+                    rows={2}
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                    placeholder="Por que essa ideia está sendo cancelada?"
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none resize-none"
+                    style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  />
+                  <div className="flex gap-2">
+                    <button onClick={() => { setShowCancelBox(false); setCancelReason(""); }} className="text-xs px-3 py-1.5 rounded-lg font-semibold border" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Voltar</button>
+                    <button onClick={handleCancelIdea} disabled={cancelling} className="text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 disabled:opacity-60" style={{ background: "#EF4444", color: "white" }}>
+                      {cancelling && <Loader2 size={11} className="animate-spin" />}
+                      Confirmar cancelamento
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2 pt-2 border-t" style={{ borderColor: "var(--border)" }}>
+                {selected.status === "Cancelada" ? (
+                  <button
+                    onClick={handleReactivateIdea}
+                    disabled={reactivating}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-60"
+                    style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+                  >
+                    {reactivating ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />}
+                    Reativar ideia
+                  </button>
+                ) : selected.projectId ? (
+                  <div className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: "#ECFDF5", color: "#065F46" }}>
+                    <ExternalLink size={13} />Já enviada pra Projetos
+                  </div>
+                ) : (
+                  <>
+                    <button
+                      onClick={handleConvertToProject}
+                      disabled={converting}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-60"
+                      style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+                    >
+                      {converting ? <Loader2 size={13} className="animate-spin" /> : <Rocket size={13} />}
+                      Enviar pra Projetos
+                    </button>
+                    <button
+                      onClick={() => setShowCancelBox(true)}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm border font-medium"
+                      style={{ borderColor: "var(--border)", color: "#EF4444" }}
+                    >
+                      <Ban size={13} />Cancelar ideia
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -214,12 +420,12 @@ export function Ideas() {
       {/* New Idea Modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.4)" }}>
-          <div className="w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden" style={{ background: "var(--card)" }}>
-            <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: "var(--border)" }}>
-              <h3 className="font-bold" style={{ color: "var(--foreground)" }}>Nova Ideia</h3>
-              <button onClick={() => setShowModal(false)} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
+          <div className="w-full max-w-lg max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col" style={{ background: "var(--card)" }}>
+            <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
+              <h3 className="font-bold" style={{ color: "var(--foreground)" }}>{editingId ? "Editar Ideia" : "Nova Ideia"}</h3>
+              <button onClick={() => { setShowModal(false); setForm(emptyForm); setEditingId(null); }} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
               {[["Título", "text", "Nome da ideia", "title"], ["Categoria", "text", "Ex: SaaS, Fintech...", "category"], ["Público-alvo", "text", "Quem vai usar?", "target_audience"]].map(([l, t, ph, key]) => (
                 <div key={l as string}>
                   <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>{l as string}</label>
@@ -267,18 +473,29 @@ export function Ideas() {
                     <option>Alto</option><option>Médio</option><option>Baixo</option>
                   </select>
                 </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Complexidade</label>
+                  <select
+                    value={form.complexity}
+                    onChange={(e) => setForm({ ...form, complexity: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  >
+                    <option>Alta</option><option>Média</option><option>Baixa</option>
+                  </select>
+                </div>
               </div>
             </div>
-            <div className="flex gap-3 px-6 pb-6">
-              <button onClick={() => { setShowModal(false); setForm(emptyForm); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
+            <div className="flex gap-3 px-6 pb-6 flex-shrink-0">
+              <button onClick={() => { setShowModal(false); setForm(emptyForm); setEditingId(null); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
               <button
-                onClick={handleCreateIdea}
+                onClick={handleSaveIdea}
                 disabled={saving || !form.title.trim()}
                 className="flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
                 style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
               >
                 {saving && <Loader2 size={13} className="animate-spin" />}
-                Salvar ideia
+                {editingId ? "Salvar alterações" : "Salvar ideia"}
               </button>
             </div>
           </div>

@@ -100,7 +100,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const rows = await sql`
           SELECT id, title, description, category, author_name, priority, revenue_potential,
                  complexity, target_audience, status, score_viability, score_commercial,
-                 score_innovation, score_cost, score_time, created_at
+                 score_innovation, score_cost, score_time, project_id, cancel_reason, created_at
           FROM ideas ORDER BY created_at DESC
         `;
         return res.status(200).json(rows);
@@ -111,7 +111,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const [idea] = await sql`
         INSERT INTO ideas (title, description, category, author_name, priority, revenue_potential, complexity, target_audience, status)
         VALUES (${title}, ${description ?? null}, ${category ?? null}, ${authorName}, ${priority || "Média"}, ${revenue_potential ?? null}, ${complexity ?? null}, ${target_audience ?? null}, 'Nova')
-        RETURNING id, title, description, category, author_name, priority, revenue_potential, complexity, target_audience, status, score_viability, score_commercial, score_innovation, score_cost, score_time, created_at
+        RETURNING id, title, description, category, author_name, priority, revenue_potential, complexity, target_audience, status, score_viability, score_commercial, score_innovation, score_cost, score_time, project_id, cancel_reason, created_at
       `;
       return res.status(201).json(idea);
     }
