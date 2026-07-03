@@ -9,21 +9,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === "GET") {
     const projects = await sql`
       SELECT id, name, client, description, responsible_name, start_date, deadline,
-             progress, status, priority, tasks_done, tasks_total, created_at
+             progress, status, priority, tasks_done, tasks_total, contract_value, created_at
       FROM projects ORDER BY created_at DESC
     `;
     return res.status(200).json(projects);
   }
 
   if (req.method === "POST") {
-    const { name, client, description, deadline, priority } = req.body ?? {};
+    const { name, client, description, deadline, priority, contract_value, responsible_name } = req.body ?? {};
     if (!name) return res.status(400).json({ error: "Nome é obrigatório" });
 
-    const responsibleName = niceName(user);
+    const responsibleName = responsible_name || niceName(user);
     const [project] = await sql`
-      INSERT INTO projects (name, client, description, responsible_name, start_date, deadline, progress, status, priority, tasks_done, tasks_total)
-      VALUES (${name}, ${client ?? null}, ${description ?? null}, ${responsibleName}, CURRENT_DATE, ${deadline || null}, 0, 'Planejamento', ${priority || "Média"}, 0, 0)
-      RETURNING id, name, client, description, responsible_name, start_date, deadline, progress, status, priority, tasks_done, tasks_total, created_at
+      INSERT INTO projects (name, client, description, responsible_name, start_date, deadline, progress, status, priority, tasks_done, tasks_total, contract_value)
+      VALUES (${name}, ${client ?? null}, ${description ?? null}, ${responsibleName}, CURRENT_DATE, ${deadline || null}, 0, 'Novo', ${priority || "Média"}, 0, 0, ${contract_value ?? 0})
+      RETURNING id, name, client, description, responsible_name, start_date, deadline, progress, status, priority, tasks_done, tasks_total, contract_value, created_at
     `;
     return res.status(201).json(project);
   }

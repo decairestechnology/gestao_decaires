@@ -119,6 +119,7 @@ export interface Project {
   priority: string;
   tasks_done: number;
   tasks_total: number;
+  contract_value: string;
   created_at: string;
 }
 
@@ -262,6 +263,14 @@ export const projectsApi = {
     });
     return handleResponse(res);
   },
+  async update(id: number, fields: Partial<Project>) {
+    const res = await fetch(`/api/projects/${id}`, {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify(fields),
+    });
+    return handleResponse(res);
+  },
   async updateProgress(id: number, patch: { status?: string; progress?: number }) {
     const res = await fetch(`/api/projects/${id}`, {
       method: "PATCH",
@@ -270,9 +279,122 @@ export const projectsApi = {
     });
     return handleResponse(res);
   },
+  async remove(id: number) {
+    const res = await fetch(`/api/projects/${id}`, {
+      method: "DELETE",
+      headers: await authHeaders(),
+    });
+    await handleResponse(res);
+  },
 };
 
-export const transactionsApi = makeResource("transactions");
+export interface ProjectTask {
+  id: number;
+  project_id: number;
+  title: string;
+  priority: string;
+  due_date: string | null;
+  done: boolean;
+  created_at: string;
+}
+
+export const projectTasksApi = {
+  async list(projectId: number): Promise<ProjectTask[]> {
+    const res = await fetch(`/api/projects/${projectId}/tasks`, { headers: await authHeaders() });
+    return handleResponse(res);
+  },
+  async create(projectId: number, data: { title: string; priority?: string; due_date?: string }) {
+    const res = await fetch(`/api/projects/${projectId}/tasks`, {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+  async update(projectId: number, taskId: number, fields: Partial<ProjectTask>) {
+    const res = await fetch(`/api/projects/${projectId}/tasks`, {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ taskId, ...fields }),
+    });
+    return handleResponse(res);
+  },
+  async remove(projectId: number, taskId: number) {
+    const res = await fetch(`/api/projects/${projectId}/tasks?taskId=${taskId}`, {
+      method: "DELETE",
+      headers: await authHeaders(),
+    });
+    await handleResponse(res);
+  },
+};
+
+export interface ProjectFile {
+  id: number;
+  project_id: number;
+  name: string;
+  url: string;
+  path: string;
+  size_bytes: number | null;
+  content_type: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+}
+
+export const projectFilesApi = {
+  async list(projectId: number): Promise<ProjectFile[]> {
+    const res = await fetch(`/api/projects/${projectId}/files`, { headers: await authHeaders() });
+    return handleResponse(res);
+  },
+  async create(projectId: number, data: { name: string; url: string; path: string; size_bytes?: number; content_type?: string }) {
+    const res = await fetch(`/api/projects/${projectId}/files`, {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+  async remove(projectId: number, fileId: number) {
+    const res = await fetch(`/api/projects/${projectId}/files?fileId=${fileId}`, {
+      method: "DELETE",
+      headers: await authHeaders(),
+    });
+    await handleResponse(res);
+  },
+};
+
+export interface ProjectActivity {
+  id: number;
+  note: string;
+  author_name: string | null;
+  created_at: string;
+}
+
+export const projectActivitiesApi = {
+  async list(projectId: number): Promise<ProjectActivity[]> {
+    const res = await fetch(`/api/projects/${projectId}/activities`, { headers: await authHeaders() });
+    return handleResponse(res);
+  },
+  async add(projectId: number, note: string) {
+    const res = await fetch(`/api/projects/${projectId}/activities`, {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ note }),
+    });
+    return handleResponse(res);
+  },
+};
+
+export const transactionsApi = {
+  ...makeResource<Transaction>("transactions"),
+  async setStatus(id: number, status: string) {
+    const res = await fetch("/api/resources/transactions", {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ id, status }),
+    });
+    return handleResponse(res);
+  },
+};
 export const eventsApi = makeResource("events");
 export const goalsApi = makeResource("goals");
 export const ideasApi = {

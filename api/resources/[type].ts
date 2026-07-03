@@ -8,8 +8,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const type = String(req.query.type ?? "");
 
-  if (req.method !== "GET" && req.method !== "POST") {
-    res.setHeader("Allow", "GET, POST");
+  if (req.method !== "GET" && req.method !== "POST" && req.method !== "PATCH") {
+    res.setHeader("Allow", "GET, POST, PATCH");
     return res.status(405).json({ error: "Método não permitido" });
   }
 
@@ -22,13 +22,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `;
         return res.status(200).json(rows);
       }
-      const { description, category, client, type: txType, value, payment_method, date } = req.body ?? {};
+      if (req.method === "PATCH") {
+        const { id: txId, status: newStatus } = req.body ?? {};
+        if (!txId || !newStatus) return res.status(400).json({ error: "id e status são obrigatórios" });
+        const [updated] = await sql`
+          UPDATE financial_transactions SET status = ${newStatus}
+          WHERE id = ${txId}
+          RETURNING id, date, description, category, project_id, client, type, value, payment_method, status, created_at
+        `;
+        if (!updated) return res.status(404).json({ error: "Lançamento não encontrado" });
+        return res.status(200).json(updated);
+      }
+      const { description, category, client, type: txType, value, payment_method, date, project_id, status: txStatus } = req.body ?? {};
       if (!description || !txType || value === undefined) {
         return res.status(400).json({ error: "Descrição, tipo e valor são obrigatórios" });
       }
       const [tx] = await sql`
-        INSERT INTO financial_transactions (date, description, category, client, type, value, payment_method, status)
-        VALUES (${date || new Date().toISOString().slice(0, 10)}, ${description}, ${category ?? null}, ${client ?? null}, ${txType}, ${value}, ${payment_method ?? null}, 'Pendente')
+        INSERT INTO financial_transactions (date, description, category, client, type, value, payment_method, status, project_id)
+        VALUES (${date || new Date().toISOString().slice(0, 10)}, ${description}, ${category ?? null}, ${client ?? null}, ${txType}, ${value}, ${payment_method ?? null}, ${txStatus || "Pendente"}, ${project_id ?? null})
         RETURNING id, date, description, category, project_id, client, type, value, payment_method, status, created_at
       `;
       return res.status(201).json(tx);
