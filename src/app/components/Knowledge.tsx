@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Search, Plus, Star, Clock, ChevronRight, FileText, Folder, Tag, X, BookOpen, Loader2 } from "lucide-react";
+import { Search, Plus, Star, Clock, ChevronRight, FileText, Folder, Tag, X, BookOpen, Loader2, Pencil, Trash2 } from "lucide-react";
 import { articlesApi, type Article as ApiArticle } from "../../lib/api";
 
 const categories = [
@@ -38,7 +38,7 @@ function toUiArticle(a: ApiArticle): UiArticle {
   };
 }
 
-const emptyForm = { title: "", content: "", tagsRaw: "" };
+const emptyForm = { title: "", content: "", tagsRaw: "", category_id: "" };
 
 export function Knowledge() {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -50,6 +50,10 @@ export function Knowledge() {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [togglingStar, setTogglingStar] = useState(false);
 
   const loadArticles = useCallback(async () => {
     setLoading(true);
@@ -70,19 +74,66 @@ export function Knowledge() {
     loadArticles();
   }, [loadArticles]);
 
-  async function handleCreateArticle() {
+  async function handleSaveArticle() {
     if (!form.title.trim()) return;
     setSaving(true);
     try {
       const tags = form.tagsRaw.split(",").map((t) => t.trim()).filter(Boolean);
-      await articlesApi.create({ title: form.title, content: form.content, tags });
+      if (editingId) {
+        const updated = await articlesApi.update(editingId, { title: form.title, content: form.content, category_id: form.category_id || null, tags });
+        if (selectedArticle?.id === editingId) setSelectedArticle(toUiArticle(updated));
+      } else {
+        await articlesApi.create({ title: form.title, content: form.content, tags, category_id: form.category_id || null });
+      }
       setForm(emptyForm);
+      setEditingId(null);
       setShowModal(false);
       await loadArticles();
     } catch (err: any) {
-      setError(err?.message ?? "Não foi possível criar o documento.");
+      setError(err?.message ?? "Não foi possível salvar o documento.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  function openCreateModal() {
+    setEditingId(null);
+    setForm(emptyForm);
+    setShowModal(true);
+  }
+
+  function openEditModal(a: UiArticle) {
+    setEditingId(a.id);
+    setForm({ title: a.title, content: a.content, tagsRaw: a.tags.join(", "), category_id: a.cat ?? "" });
+    setShowModal(true);
+  }
+
+  async function handleDeleteArticle() {
+    if (!selectedArticle) return;
+    setDeleting(true);
+    try {
+      await articlesApi.remove(selectedArticle.id);
+      setSelectedArticle(null);
+      setConfirmDelete(false);
+      await loadArticles();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível excluir o documento.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleToggleStar() {
+    if (!selectedArticle) return;
+    setTogglingStar(true);
+    try {
+      const updated = await articlesApi.setStarred(selectedArticle.id, !selectedArticle.starred);
+      setSelectedArticle(toUiArticle(updated));
+      await loadArticles();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível favoritar o documento.");
+    } finally {
+      setTogglingStar(false);
     }
   }
 
@@ -115,7 +166,7 @@ export function Knowledge() {
           <div className="mb-3">
             <div className="text-xs font-semibold px-2 py-1 mb-1" style={{ color: "var(--muted-foreground)" }}>FAVORITOS</div>
             {starred.map(a => (
-              <button key={a.id} onClick={() => setSelectedArticle(a)} className="w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2 text-xs transition-colors hover:bg-muted" style={{ color: selectedArticle?.id === a.id ? "var(--primary)" : "var(--foreground)", background: selectedArticle?.id === a.id ? "var(--accent)" : "transparent" }}>
+              <button key={a.id} onClick={() => { setSelectedArticle(a); setConfirmDelete(false); }} className="w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2 text-xs transition-colors hover:bg-muted" style={{ color: selectedArticle?.id === a.id ? "var(--primary)" : "var(--foreground)", background: selectedArticle?.id === a.id ? "var(--accent)" : "transparent" }}>
                 <Star size={11} style={{ color: "#F59E0B", flexShrink: 0 }} />
                 <span className="truncate">{a.title}</span>
               </button>
@@ -139,7 +190,7 @@ export function Knowledge() {
           <div>
             <div className="text-xs font-semibold px-2 py-1 mb-1" style={{ color: "var(--muted-foreground)" }}>RECENTES</div>
             {recent.map(a => (
-              <button key={a.id} onClick={() => setSelectedArticle(a)} className="w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2 text-xs transition-colors hover:bg-muted" style={{ color: "var(--foreground)" }}>
+              <button key={a.id} onClick={() => { setSelectedArticle(a); setConfirmDelete(false); }} className="w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2 text-xs transition-colors hover:bg-muted" style={{ color: "var(--foreground)" }}>
                 <Clock size={11} style={{ color: "var(--muted-foreground)", flexShrink: 0 }} />
                 <span className="truncate">{a.title}</span>
               </button>
@@ -147,7 +198,7 @@ export function Knowledge() {
           </div>
         </div>
         <div className="p-2 border-t" style={{ borderColor: "var(--border)" }}>
-          <button onClick={() => setShowModal(true)} className="w-full flex items-center gap-2 px-2 py-2 rounded-lg text-xs font-semibold transition hover:opacity-90" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>
+          <button onClick={openCreateModal} className="w-full flex items-center gap-2 px-2 py-2 rounded-lg text-xs font-semibold transition hover:opacity-90" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>
             <Plus size={12} />Novo documento
           </button>
         </div>
@@ -157,7 +208,7 @@ export function Knowledge() {
       <div className="w-56 flex-shrink-0 border-r overflow-y-auto" style={{ borderColor: "var(--border)", background: "var(--muted)", scrollbarWidth: "none" }}>
         <div className="p-3 space-y-1">
           {filtered.map(a => (
-            <button key={a.id} onClick={() => setSelectedArticle(a)}
+            <button key={a.id} onClick={() => { setSelectedArticle(a); setConfirmDelete(false); }}
               className="w-full text-left p-3 rounded-lg transition-all"
               style={{ background: selectedArticle?.id === a.id ? "var(--card)" : "transparent", borderLeft: selectedArticle?.id === a.id ? `3px solid var(--primary)` : "3px solid transparent" }}>
               <div className="flex items-start justify-between gap-2 mb-1">
@@ -179,10 +230,36 @@ export function Knowledge() {
         {selectedArticle ? (
           <div className="max-w-3xl mx-auto p-8">
             <div className="mb-6">
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: "var(--accent)", color: "var(--accent-foreground)" }}>{selectedArticle.catLabel}</span>
-                {selectedArticle.starred && <Star size={13} style={{ color: "#F59E0B" }} />}
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: "var(--accent)", color: "var(--accent-foreground)" }}>{selectedArticle.catLabel}</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button onClick={handleToggleStar} disabled={togglingStar} title={selectedArticle.starred ? "Remover dos favoritos" : "Favoritar"} className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted">
+                    <Star size={15} style={{ color: selectedArticle.starred ? "#F59E0B" : "var(--muted-foreground)" }} fill={selectedArticle.starred ? "#F59E0B" : "none"} />
+                  </button>
+                  <button onClick={() => openEditModal(selectedArticle)} title="Editar" className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "var(--muted-foreground)" }}>
+                    <Pencil size={14} />
+                  </button>
+                  <button onClick={() => setConfirmDelete(true)} title="Excluir" className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "#EF4444" }}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
+
+              {confirmDelete && (
+                <div className="mb-3 rounded-lg px-4 py-3 flex items-center justify-between gap-3" style={{ background: "#FEF2F2" }}>
+                  <span className="text-xs font-medium" style={{ color: "#991B1B" }}>Excluir esse documento?</span>
+                  <div className="flex gap-2 flex-shrink-0">
+                    <button onClick={() => setConfirmDelete(false)} className="text-xs px-3 py-1.5 rounded-lg font-semibold" style={{ background: "white", color: "var(--foreground)" }}>Cancelar</button>
+                    <button onClick={handleDeleteArticle} disabled={deleting} className="text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 disabled:opacity-60" style={{ background: "#EF4444", color: "white" }}>
+                      {deleting && <Loader2 size={11} className="animate-spin" />}
+                      Excluir
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <h2 className="text-2xl font-bold mb-2" style={{ color: "var(--foreground)" }}>{selectedArticle.title}</h2>
               <div className="flex items-center gap-3 text-xs" style={{ color: "var(--muted-foreground)" }}>
                 <span>por {selectedArticle.author}</span>
@@ -222,8 +299,8 @@ export function Knowledge() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.4)" }}>
           <div className="w-full max-w-md rounded-2xl shadow-2xl overflow-hidden" style={{ background: "var(--card)" }}>
             <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: "var(--border)" }}>
-              <h3 className="font-bold" style={{ color: "var(--foreground)" }}>Novo Documento</h3>
-              <button onClick={() => setShowModal(false)} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
+              <h3 className="font-bold" style={{ color: "var(--foreground)" }}>{editingId ? "Editar Documento" : "Novo Documento"}</h3>
+              <button onClick={() => { setShowModal(false); setForm(emptyForm); setEditingId(null); }} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
             </div>
             <div className="p-6 space-y-4">
               <div>
@@ -236,6 +313,18 @@ export function Knowledge() {
                   className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
                   style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
                 />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Categoria</label>
+                <select
+                  value={form.category_id}
+                  onChange={(e) => setForm({ ...form, category_id: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                >
+                  <option value="">Sem categoria</option>
+                  {categories.map((c) => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+                </select>
               </div>
               <div>
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Conteúdo</label>
@@ -261,15 +350,15 @@ export function Knowledge() {
               </div>
             </div>
             <div className="flex gap-3 px-6 pb-6">
-              <button onClick={() => { setShowModal(false); setForm(emptyForm); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
+              <button onClick={() => { setShowModal(false); setForm(emptyForm); setEditingId(null); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
               <button
-                onClick={handleCreateArticle}
+                onClick={handleSaveArticle}
                 disabled={saving || !form.title.trim()}
                 className="flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
                 style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
               >
                 {saving && <Loader2 size={13} className="animate-spin" />}
-                Criar
+                {editingId ? "Salvar alterações" : "Criar"}
               </button>
             </div>
           </div>

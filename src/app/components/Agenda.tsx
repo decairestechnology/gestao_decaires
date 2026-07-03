@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { ChevronLeft, ChevronRight, Plus, X, Loader2 } from "lucide-react";
-import { eventsApi, type AgendaEvent as ApiEvent } from "../../lib/api";
+import { ChevronLeft, ChevronRight, Plus, X, Loader2, Pencil, Trash2, CheckCircle2 } from "lucide-react";
+import { eventsApi, projectsApi, type AgendaEvent as ApiEvent, type Project } from "../../lib/api";
 
 type ViewMode = "mensal" | "semanal" | "diário" | "lista";
 
@@ -19,6 +19,7 @@ interface UiEvent {
   location: string;
   participants: string[];
   project: string;
+  projectId: number | null;
   responsible: string;
   status: string;
   type: string;
@@ -34,6 +35,7 @@ function toUiEvent(e: ApiEvent): UiEvent {
     location: e.location ?? "—",
     participants: e.responsible_name ? [e.responsible_name] : [],
     project: "—",
+    projectId: e.project_id,
     responsible: e.responsible_name ?? "—",
     status: e.status,
     type: e.type ?? "Evento",
@@ -91,19 +93,25 @@ function CalendarGrid({ year, month, events, onSelect }: { year: number; month: 
   );
 }
 
-const emptyForm = { title: "", date: "", start_time: "", location: "", type: "Reunião" };
+const emptyForm = { title: "", date: "", start_time: "", location: "", type: "Reunião", project_id: "" };
 
 export function Agenda() {
+  const today = new Date();
   const [view, setView] = useState<ViewMode>("mensal");
-  const [year, setYear] = useState(2026);
-  const [month, setMonth] = useState(5); // June
+  const [year, setYear] = useState(today.getFullYear());
+  const [month, setMonth] = useState(today.getMonth());
   const [selected, setSelected] = useState<UiEvent | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [events, setEvents] = useState<UiEvent[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmingStatus, setConfirmingStatus] = useState(false);
 
   const loadEvents = useCallback(async () => {
     setLoading(true);
@@ -120,21 +128,87 @@ export function Agenda() {
 
   useEffect(() => {
     loadEvents();
+    projectsApi.list().then(setProjects).catch(() => {});
   }, [loadEvents]);
 
-  async function handleCreateEvent() {
+  function projectName(id: number | null) {
+    if (!id) return "—";
+    return projects.find((p) => p.id === id)?.name ?? "—";
+  }
+
+  async function handleSaveEvent() {
     if (!form.title.trim() || !form.date) return;
     setSaving(true);
     try {
-      await eventsApi.create(form);
+      const payload = { ...form, project_id: form.project_id ? Number(form.project_id) : null };
+      if (editingId) {
+        const updated = await eventsApi.update(editingId, payload as any);
+        if (selected?.id === editingId) setSelected(toUiEvent(updated));
+      } else {
+        await eventsApi.create(payload);
+      }
       setForm(emptyForm);
+      setEditingId(null);
       setShowModal(false);
       await loadEvents();
     } catch (err: any) {
-      setError(err?.message ?? "Não foi possível criar o evento.");
+      setError(err?.message ?? "Não foi possível salvar o evento.");
     } finally {
       setSaving(false);
     }
+  }
+
+  function openCreateModal() {
+    setEditingId(null);
+    setForm(emptyForm);
+    setShowModal(true);
+  }
+
+  function openEditModal(e: UiEvent) {
+    setEditingId(e.id);
+    setForm({
+      title: e.title,
+      date: e.date,
+      start_time: e.time === "—" ? "" : e.time,
+      location: e.location === "—" ? "" : e.location,
+      type: e.type,
+      project_id: e.projectId ? String(e.projectId) : "",
+    });
+    setShowModal(true);
+  }
+
+  async function handleDeleteEvent() {
+    if (!selected) return;
+    setDeleting(true);
+    try {
+      await eventsApi.remove(selected.id);
+      setSelected(null);
+      setConfirmDelete(false);
+      await loadEvents();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível excluir o evento.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleConfirmStatus() {
+    if (!selected) return;
+    setConfirmingStatus(true);
+    try {
+      const updated = await eventsApi.setStatus(selected.id, "Confirmado");
+      setSelected(toUiEvent(updated));
+      await loadEvents();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível confirmar o evento.");
+    } finally {
+      setConfirmingStatus(false);
+    }
+  }
+
+  function openEvent(e: UiEvent) {
+    setSelected(e);
+    setConfirmDelete(false);
   }
 
   const prevMonth = () => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); };
@@ -163,21 +237,21 @@ export function Agenda() {
             </button>
           ))}
         </div>
-        <button onClick={() => setShowModal(true)} className="ml-auto flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition hover:opacity-90" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>
+        <button onClick={openCreateModal} className="ml-auto flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition hover:opacity-90" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>
           <Plus size={14} />Novo evento
         </button>
       </div>
 
       {view === "mensal" && (
         <div className="rounded-xl border shadow-sm p-5" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
-          <CalendarGrid year={year} month={month} events={events} onSelect={setSelected} />
+          <CalendarGrid year={year} month={month} events={events} onSelect={openEvent} />
         </div>
       )}
 
       {view === "lista" && (
         <div className="space-y-3">
           {events.sort((a, b) => a.date.localeCompare(b.date)).map((e) => (
-            <div key={e.id} onClick={() => setSelected(e)}
+            <div key={e.id} onClick={() => openEvent(e)}
               className="rounded-xl border p-4 shadow-sm cursor-pointer hover:shadow-md transition-all flex items-center gap-4"
               style={{ background: "var(--card)", borderColor: "var(--border)" }}>
               <div className="w-1 self-stretch rounded-full flex-shrink-0" style={{ background: typeColors[e.type] }} />
@@ -212,14 +286,36 @@ export function Agenda() {
                 <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: `${typeColors[selected.type]}20`, color: typeColors[selected.type] }}>{selected.type}</span>
                 <h3 className="font-bold mt-1" style={{ color: "var(--foreground)" }}>{selected.title}</h3>
               </div>
-              <button onClick={() => setSelected(null)} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button onClick={() => openEditModal(selected)} title="Editar" className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "var(--muted-foreground)" }}>
+                  <Pencil size={14} />
+                </button>
+                <button onClick={() => setConfirmDelete(true)} title="Excluir" className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "#EF4444" }}>
+                  <Trash2 size={14} />
+                </button>
+                <button onClick={() => setSelected(null)} className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
+              </div>
             </div>
+
+            {confirmDelete && (
+              <div className="px-6 py-3 flex items-center justify-between gap-3" style={{ background: "#FEF2F2" }}>
+                <span className="text-xs font-medium" style={{ color: "#991B1B" }}>Excluir esse evento?</span>
+                <div className="flex gap-2 flex-shrink-0">
+                  <button onClick={() => setConfirmDelete(false)} className="text-xs px-3 py-1.5 rounded-lg font-semibold" style={{ background: "white", color: "var(--foreground)" }}>Cancelar</button>
+                  <button onClick={handleDeleteEvent} disabled={deleting} className="text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 disabled:opacity-60" style={{ background: "#EF4444", color: "white" }}>
+                    {deleting && <Loader2 size={11} className="animate-spin" />}
+                    Excluir
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="p-6 grid grid-cols-2 gap-3">
               {[
                 ["Data", new Date(selected.date + "T00:00:00").toLocaleDateString("pt-BR")],
                 ["Horário", `${selected.time} – ${selected.end}`],
                 ["Local", selected.location],
-                ["Projeto", selected.project],
+                ["Projeto", projectName(selected.projectId)],
                 ["Responsável", selected.responsible],
                 ["Status", selected.status],
               ].map(([k, v]) => (
@@ -237,6 +333,19 @@ export function Agenda() {
                 </div>
               </div>
             </div>
+            {selected.status !== "Confirmado" && (
+              <div className="px-6 pb-6">
+                <button
+                  onClick={handleConfirmStatus}
+                  disabled={confirmingStatus}
+                  className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-semibold disabled:opacity-60"
+                  style={{ background: "#ECFDF5", color: "#065F46" }}
+                >
+                  {confirmingStatus ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                  Marcar como confirmado
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -245,8 +354,8 @@ export function Agenda() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.4)" }}>
           <div className="w-full max-w-md rounded-2xl shadow-2xl overflow-hidden" style={{ background: "var(--card)" }}>
             <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: "var(--border)" }}>
-              <h3 className="font-bold" style={{ color: "var(--foreground)" }}>Novo Evento</h3>
-              <button onClick={() => setShowModal(false)} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
+              <h3 className="font-bold" style={{ color: "var(--foreground)" }}>{editingId ? "Editar Evento" : "Novo Evento"}</h3>
+              <button onClick={() => { setShowModal(false); setForm(emptyForm); setEditingId(null); }} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
             </div>
             <div className="p-6 space-y-4">
               {[["Título", "text", "Nome do evento", "title"], ["Data", "date", "", "date"], ["Horário", "time", "", "start_time"], ["Local / Link", "text", "Sala, Google Meet...", "location"]].map(([l, t, ph, key]) => (
@@ -273,17 +382,29 @@ export function Agenda() {
                   {eventTypes.map(t => <option key={t}>{t}</option>)}
                 </select>
               </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Projeto (opcional)</label>
+                <select
+                  value={form.project_id}
+                  onChange={(e) => setForm({ ...form, project_id: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                >
+                  <option value="">Nenhum</option>
+                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
             </div>
             <div className="flex gap-3 px-6 pb-6">
-              <button onClick={() => { setShowModal(false); setForm(emptyForm); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
+              <button onClick={() => { setShowModal(false); setForm(emptyForm); setEditingId(null); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
               <button
-                onClick={handleCreateEvent}
+                onClick={handleSaveEvent}
                 disabled={saving || !form.title.trim() || !form.date}
                 className="flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
                 style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
               >
                 {saving && <Loader2 size={13} className="animate-spin" />}
-                Criar evento
+                {editingId ? "Salvar alterações" : "Criar evento"}
               </button>
             </div>
           </div>

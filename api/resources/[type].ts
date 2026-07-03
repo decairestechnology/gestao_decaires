@@ -82,12 +82,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `;
         return res.status(200).json(rows);
       }
-      const { title, date, start_time, end_time, location, type: evType } = req.body ?? {};
+      if (req.method === "PATCH") {
+        const body = req.body ?? {};
+        if (!body.id) return res.status(400).json({ error: "id é obrigatório" });
+        if (body.fields) {
+          const f = body.fields;
+          const [updated] = await sql`
+            UPDATE agenda_events SET
+              title = COALESCE(${f.title ?? null}, title),
+              date = COALESCE(${f.date ?? null}, date),
+              start_time = ${f.start_time ?? null},
+              end_time = ${f.end_time ?? null},
+              location = ${f.location ?? null},
+              type = COALESCE(${f.type ?? null}, type),
+              project_id = ${f.project_id ?? null}
+            WHERE id = ${body.id}
+            RETURNING id, title, date, start_time, end_time, location, project_id, responsible_name, status, type, created_at
+          `;
+          if (!updated) return res.status(404).json({ error: "Evento não encontrado" });
+          return res.status(200).json(updated);
+        }
+        if (body.status) {
+          const [updated] = await sql`
+            UPDATE agenda_events SET status = ${body.status} WHERE id = ${body.id}
+            RETURNING id, title, date, start_time, end_time, location, project_id, responsible_name, status, type, created_at
+          `;
+          if (!updated) return res.status(404).json({ error: "Evento não encontrado" });
+          return res.status(200).json(updated);
+        }
+        return res.status(400).json({ error: "Nada para atualizar" });
+      }
+      if (req.method === "DELETE") {
+        const evId = Number(req.query.id);
+        if (!evId) return res.status(400).json({ error: "id é obrigatório" });
+        await sql`DELETE FROM agenda_events WHERE id = ${evId}`;
+        return res.status(204).end();
+      }
+      const { title, date, start_time, end_time, location, type: evType, project_id } = req.body ?? {};
       if (!title || !date) return res.status(400).json({ error: "Título e data são obrigatórios" });
       const responsibleName = niceName(user);
       const [event] = await sql`
-        INSERT INTO agenda_events (title, date, start_time, end_time, location, responsible_name, status, type)
-        VALUES (${title}, ${date}, ${start_time || null}, ${end_time || null}, ${location ?? null}, ${responsibleName}, 'Pendente', ${evType || "Reunião"})
+        INSERT INTO agenda_events (title, date, start_time, end_time, location, responsible_name, status, type, project_id)
+        VALUES (${title}, ${date}, ${start_time || null}, ${end_time || null}, ${location ?? null}, ${responsibleName}, 'Pendente', ${evType || "Reunião"}, ${project_id ?? null})
         RETURNING id, title, date, start_time, end_time, location, project_id, responsible_name, status, type, created_at
       `;
       return res.status(201).json(event);
@@ -165,12 +201,64 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `;
         return res.status(200).json(rows);
       }
-      const { title, content, tags } = req.body ?? {};
+      if (req.method === "PATCH") {
+        const body = req.body ?? {};
+        if (!body.id) return res.status(400).json({ error: "id é obrigatório" });
+
+        if (body.fields) {
+          const f = body.fields;
+          const [updated] = await sql`
+            UPDATE knowledge_articles SET
+              title = COALESCE(${f.title ?? null}, title),
+              content = ${f.content ?? null},
+              category_id = ${f.category_id ?? null},
+              updated_at = now()
+            WHERE id = ${body.id}
+            RETURNING id
+          `;
+          if (!updated) return res.status(404).json({ error: "Artigo não encontrado" });
+
+          if (Array.isArray(f.tags)) {
+            await sql`DELETE FROM knowledge_article_tags WHERE article_id = ${body.id}`;
+            for (const tag of f.tags) {
+              if (tag) await sql`INSERT INTO knowledge_article_tags (article_id, tag) VALUES (${body.id}, ${tag}) ON CONFLICT DO NOTHING`;
+            }
+          }
+          const [full] = await sql`
+            SELECT a.id, a.title, a.category_id, a.author_name, a.content, a.starred, a.updated_at, a.created_at,
+                   COALESCE((SELECT json_agg(t.tag) FROM knowledge_article_tags t WHERE t.article_id = a.id), '[]') AS tags
+            FROM knowledge_articles a WHERE a.id = ${body.id}
+          `;
+          return res.status(200).json(full);
+        }
+
+        if (body.starred !== undefined) {
+          const [updated] = await sql`
+            UPDATE knowledge_articles SET starred = ${body.starred}, updated_at = now() WHERE id = ${body.id}
+            RETURNING id, title, category_id, author_name, content, starred, updated_at, created_at
+          `;
+          if (!updated) return res.status(404).json({ error: "Artigo não encontrado" });
+          const [full] = await sql`
+            SELECT a.id, a.title, a.category_id, a.author_name, a.content, a.starred, a.updated_at, a.created_at,
+                   COALESCE((SELECT json_agg(t.tag) FROM knowledge_article_tags t WHERE t.article_id = a.id), '[]') AS tags
+            FROM knowledge_articles a WHERE a.id = ${body.id}
+          `;
+          return res.status(200).json(full);
+        }
+        return res.status(400).json({ error: "Nada para atualizar" });
+      }
+      if (req.method === "DELETE") {
+        const artId = Number(req.query.id);
+        if (!artId) return res.status(400).json({ error: "id é obrigatório" });
+        await sql`DELETE FROM knowledge_articles WHERE id = ${artId}`;
+        return res.status(204).end();
+      }
+      const { title, content, tags, category_id } = req.body ?? {};
       if (!title) return res.status(400).json({ error: "Título é obrigatório" });
       const authorName = niceName(user);
       const [article] = await sql`
-        INSERT INTO knowledge_articles (title, author_name, content, starred)
-        VALUES (${title}, ${authorName}, ${content ?? null}, false)
+        INSERT INTO knowledge_articles (title, author_name, content, starred, category_id)
+        VALUES (${title}, ${authorName}, ${content ?? null}, false, ${category_id ?? null})
         RETURNING id
       `;
       if (Array.isArray(tags)) {

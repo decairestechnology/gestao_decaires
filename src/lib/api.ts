@@ -412,7 +412,32 @@ export const transactionsApi = {
     await handleResponse(res);
   },
 };
-export const eventsApi = makeResource("events");
+export const eventsApi = {
+  ...makeResource<AgendaEvent>("events"),
+  async update(id: number, fields: Partial<AgendaEvent>) {
+    const res = await fetch("/api/resources/events", {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ id, fields }),
+    });
+    return handleResponse(res);
+  },
+  async setStatus(id: number, status: string) {
+    const res = await fetch("/api/resources/events", {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ id, status }),
+    });
+    return handleResponse(res);
+  },
+  async remove(id: number) {
+    const res = await fetch(`/api/resources/events?id=${id}`, {
+      method: "DELETE",
+      headers: await authHeaders(),
+    });
+    await handleResponse(res);
+  },
+};
 export const goalsApi = makeResource("goals");
 export const ideasApi = {
   ...makeResource<Idea>("ideas"),
@@ -464,7 +489,32 @@ export const ideasApi = {
     await handleResponse(res);
   },
 };
-export const articlesApi = makeResource("articles");
+export const articlesApi = {
+  ...makeResource<Article>("articles"),
+  async update(id: number, fields: Partial<Article> & { tags?: string[] }) {
+    const res = await fetch("/api/resources/articles", {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ id, fields }),
+    });
+    return handleResponse(res);
+  },
+  async setStarred(id: number, starred: boolean) {
+    const res = await fetch("/api/resources/articles", {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ id, starred }),
+    });
+    return handleResponse(res);
+  },
+  async remove(id: number) {
+    const res = await fetch(`/api/resources/articles?id=${id}`, {
+      method: "DELETE",
+      headers: await authHeaders(),
+    });
+    await handleResponse(res);
+  },
+};
 export const platformsApi = makeResource("platforms");
 export const contentApi = makeResource("content");
 
