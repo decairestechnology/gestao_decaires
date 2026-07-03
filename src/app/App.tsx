@@ -22,12 +22,33 @@ export type Page =
   | "dashboard" | "projects" | "ideas" | "crm" | "financial" | "agenda"
   | "platforms" | "content" | "knowledge" | "goals" | "reports" | "settings";
 
+const VALID_PAGES: Page[] = [
+  "dashboard", "projects", "ideas", "crm", "financial", "agenda",
+  "platforms", "content", "knowledge", "goals", "reports", "settings",
+];
+
+function pageFromHash(): Page {
+  const hash = window.location.hash.replace("#", "") as Page;
+  return VALID_PAGES.includes(hash) ? hash : "dashboard";
+}
+
 export default function App() {
   const { user, loading, logout } = useAuth();
-  const [currentPage, setCurrentPage] = useState<Page>("dashboard");
+  const [currentPage, setCurrentPageState] = useState<Page>(pageFromHash);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  function setCurrentPage(page: Page) {
+    setCurrentPageState(page);
+    window.location.hash = page;
+  }
+
+  useEffect(() => {
+    const onHashChange = () => setCurrentPageState(pageFromHash());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
