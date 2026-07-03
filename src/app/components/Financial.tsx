@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Plus, Download, TrendingUp, TrendingDown, Wallet, AlertCircle, X, Loader2, Trash2, BarChart3, LineChart as LineChartIcon } from "lucide-react";
+import { Plus, Download, TrendingUp, TrendingDown, Wallet, AlertCircle, X, Loader2, Trash2, BarChart3, LineChart as LineChartIcon, CheckCircle2 } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { transactionsApi, type Transaction as ApiTransaction } from "../../lib/api";
 
@@ -40,6 +40,38 @@ const statusColors: Record<string, { bg: string; text: string }> = {
   "A receber": { bg: "#EFF6FF", text: "#1D4ED8" },
 };
 
+function PieBreakdown({ title, data, emptyText }: { title: string; data: { name: string; value: number; color: string }[]; emptyText: string }) {
+  return (
+    <div className="rounded-xl border p-5 shadow-sm" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
+      <div className="font-semibold text-sm mb-4" style={{ color: "var(--foreground)" }}>{title}</div>
+      {data.length > 0 ? (
+        <>
+          <ResponsiveContainer width="100%" height={130}>
+            <PieChart>
+              <Pie data={data} cx="50%" cy="50%" innerRadius={35} outerRadius={60} paddingAngle={3} dataKey="value">
+                {data.map((e, i) => <Cell key={i} fill={e.color} />)}
+              </Pie>
+              <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="space-y-1.5 mt-2">
+            {data.map((e, i) => (
+              <div key={i} className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: e.color }} /><span style={{ color: "var(--muted-foreground)" }}>{e.name}</span></span>
+                <span className="font-semibold" style={{ color: "var(--foreground)" }}>{e.value}%</span>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="flex items-center justify-center py-10 text-xs text-center" style={{ color: "var(--muted-foreground)" }}>
+          {emptyText}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const emptyForm = { description: "", value: "", category: "", date: "", payment_method: "Transferência" };
 
 export function Financial() {
@@ -53,6 +85,7 @@ export function Financial() {
   const [chartType, setChartType] = useState<"bar" | "line">("bar");
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
 
   const loadTransactions = useCallback(async () => {
     setLoading(true);
@@ -86,6 +119,18 @@ export function Financial() {
     }
   }
 
+  async function handleConfirmTransaction(id: number) {
+    setConfirmingId(id);
+    try {
+      await transactionsApi.setStatus(id, "Confirmado");
+      await loadTransactions();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível confirmar o lançamento.");
+    } finally {
+      setConfirmingId(null);
+    }
+  }
+
   async function handleDeleteTransaction(id: number) {
     setDeletingId(id);
     try {
@@ -101,7 +146,7 @@ export function Financial() {
 
   function handleExportCsv() {
     const header = ["Data", "Descrição", "Categoria", "Projeto", "Tipo", "Valor", "Status"];
-    const rows = transactions.map((t) => [
+    const rows = visibleTransactions.map((t) => [
       t.date, t.desc, t.cat, t.project,
       t.type === "receita" ? "Receita" : "Despesa",
       t.value.toFixed(2).replace(".", ","),
@@ -119,6 +164,15 @@ export function Financial() {
     URL.revokeObjectURL(url);
   }
 
+  // Extrai ano/mês de forma segura, não importa se a data vem como "2026-07-02"
+  // ou "2026-07-02T00:00:00.000Z" (formatos diferentes conforme a origem do dado).
+  function yearMonth(rawDate: string): [number, number] | null {
+    if (!rawDate) return null;
+    const [y, m] = rawDate.slice(0, 10).split("-").map(Number);
+    if (!y || !m) return null;
+    return [y, m - 1]; // mês 0-indexado, igual ao Date do JS
+  }
+
   const monthlyData = useMemo(() => {
     const now = new Date();
     const months: { key: string; month: string; receita: number; despesa: number }[] = [];
@@ -127,9 +181,9 @@ export function Financial() {
       months.push({ key: `${d.getFullYear()}-${d.getMonth()}`, month: MONTH_LABELS[d.getMonth()], receita: 0, despesa: 0 });
     }
     for (const t of transactions) {
-      if (!t.rawDate) continue;
-      const d = new Date(t.rawDate + "T00:00:00");
-      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      const ym = yearMonth(t.rawDate);
+      if (!ym) continue;
+      const key = `${ym[0]}-${ym[1]}`;
       const bucket = months.find((m) => m.key === key);
       if (!bucket) continue;
       if (t.type === "receita") bucket.receita += t.value;
@@ -138,11 +192,11 @@ export function Financial() {
     return months;
   }, [transactions]);
 
-  const expenseTypes = useMemo(() => {
+  function categoryBreakdown(kind: "receita" | "despesa") {
     const byCategory = new Map<string, number>();
     let total = 0;
     for (const t of transactions) {
-      if (t.type !== "despesa") continue;
+      if (t.type !== kind) continue;
       const cat = t.cat && t.cat !== "—" ? t.cat : "Outros";
       byCategory.set(cat, (byCategory.get(cat) ?? 0) + t.value);
       total += t.value;
@@ -151,13 +205,26 @@ export function Financial() {
     return Array.from(byCategory.entries())
       .sort((a, b) => b[1] - a[1])
       .map(([name, value], i) => ({ name, value: Math.round((value / total) * 100), color: EXPENSE_COLORS[i % EXPENSE_COLORS.length] }));
-  }, [transactions]);
+  }
+
+  const expenseTypes = useMemo(() => categoryBreakdown("despesa"), [transactions]);
+  const revenueTypes = useMemo(() => categoryBreakdown("receita"), [transactions]);
 
   const now = new Date();
   const isThisMonth = (t: UiTransaction) => {
-    if (!t.rawDate) return false;
-    const d = new Date(t.rawDate + "T00:00:00");
-    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    const ym = yearMonth(t.rawDate);
+    return !!ym && ym[0] === now.getFullYear() && ym[1] === now.getMonth();
+  };
+  const isInPeriod = (t: UiTransaction) => {
+    const ym = yearMonth(t.rawDate);
+    if (!ym) return false;
+    const [y, m] = ym;
+    const monthsAgo = (now.getFullYear() - y) * 12 + (now.getMonth() - m);
+    if (period === "Este mês") return monthsAgo === 0;
+    if (period === "Último mês") return monthsAgo === 1;
+    if (period === "Este trimestre") return monthsAgo >= 0 && monthsAgo < 3;
+    if (period === "Este ano") return y === now.getFullYear();
+    return true;
   };
   const totalReceita = transactions.filter(t => t.type === "receita" && isThisMonth(t)).reduce((a, t) => a + t.value, 0);
   const totalDespesa = transactions.filter(t => t.type === "despesa" && isThisMonth(t)).reduce((a, t) => a + t.value, 0);
@@ -166,6 +233,7 @@ export function Financial() {
   const saldo = totalReceitaGeral - totalDespesaGeral;
   const aReceber = transactions.filter(t => t.status === "A receber").reduce((a, t) => a + t.value, 0);
   const aPagar = transactions.filter(t => t.status === "Pendente").reduce((a, t) => a + t.value, 0);
+  const visibleTransactions = transactions.filter(isInPeriod);
 
   return (
     <div className="p-6 overflow-y-auto h-full" style={{ scrollbarWidth: "none" }}>
@@ -223,7 +291,7 @@ export function Financial() {
       </div>
 
       {/* Charts */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
         <div className="md:col-span-2 rounded-xl border p-5 shadow-sm" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
           <div className="flex items-center justify-between mb-4">
             <div className="font-semibold text-sm" style={{ color: "var(--foreground)" }}>Fluxo de Caixa Mensal</div>
@@ -268,33 +336,8 @@ export function Financial() {
             )}
           </ResponsiveContainer>
         </div>
-        <div className="rounded-xl border p-5 shadow-sm" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
-          <div className="font-semibold text-sm mb-4" style={{ color: "var(--foreground)" }}>Distribuição Despesas</div>
-          {expenseTypes.length > 0 ? (
-            <>
-              <ResponsiveContainer width="100%" height={130}>
-                <PieChart>
-                  <Pie data={expenseTypes} cx="50%" cy="50%" innerRadius={35} outerRadius={60} paddingAngle={3} dataKey="value">
-                    {expenseTypes.map((e, i) => <Cell key={i} fill={e.color} />)}
-                  </Pie>
-                  <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="space-y-1.5 mt-2">
-                {expenseTypes.map((e, i) => (
-                  <div key={i} className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: e.color }} /><span style={{ color: "var(--muted-foreground)" }}>{e.name}</span></span>
-                    <span className="font-semibold" style={{ color: "var(--foreground)" }}>{e.value}%</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          ) : (
-            <div className="flex items-center justify-center py-10 text-xs text-center" style={{ color: "var(--muted-foreground)" }}>
-              Nenhuma despesa com categoria registrada ainda.
-            </div>
-          )}
-        </div>
+        <PieBreakdown title="Distribuição Despesas" data={expenseTypes} emptyText="Nenhuma despesa com categoria registrada ainda." />
+        <PieBreakdown title="Distribuição Receitas" data={revenueTypes} emptyText="Nenhuma receita com categoria registrada ainda." />
       </div>
 
       {/* Transactions Table */}
@@ -312,9 +355,9 @@ export function Financial() {
               </tr>
             </thead>
             <tbody>
-              {transactions.map((t) => {
+              {visibleTransactions.map((t) => {
                 const s = statusColors[t.status] ?? { bg: "#F1F5F9", text: "#475569" };
-                const confirming = confirmDeleteId === t.id;
+                const confirmingDelete = confirmDeleteId === t.id;
                 return (
                   <tr key={t.id} className="border-b last:border-0 hover:bg-muted transition-colors" style={{ borderColor: "var(--border)" }}>
                     <td className="px-4 py-3 text-xs" style={{ color: "var(--muted-foreground)" }}>{t.date}</td>
@@ -333,7 +376,7 @@ export function Financial() {
                       <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: s.bg, color: s.text }}>{t.status}</span>
                     </td>
                     <td className="px-4 py-3">
-                      {confirming ? (
+                      {confirmingDelete ? (
                         <div className="flex items-center gap-1.5">
                           <button
                             onClick={() => handleDeleteTransaction(t.id)}
@@ -342,16 +385,28 @@ export function Financial() {
                             style={{ background: "#EF4444", color: "white" }}
                           >
                             {deletingId === t.id && <Loader2 size={10} className="animate-spin" />}
-                            Confirmar
+                            Excluir
                           </button>
                           <button onClick={() => setConfirmDeleteId(null)} className="text-xs px-2 py-1 rounded-md font-medium" style={{ background: "var(--muted)", color: "var(--foreground)" }}>
                             Cancelar
                           </button>
                         </div>
                       ) : (
-                        <button onClick={() => setConfirmDeleteId(t.id)} title="Excluir" style={{ color: "var(--muted-foreground)" }}>
-                          <Trash2 size={13} />
-                        </button>
+                        <div className="flex items-center gap-2.5">
+                          {t.status !== "Confirmado" && (
+                            <button
+                              onClick={() => handleConfirmTransaction(t.id)}
+                              disabled={confirmingId === t.id}
+                              title="Marcar como confirmado"
+                              style={{ color: "#10B981" }}
+                            >
+                              {confirmingId === t.id ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
+                            </button>
+                          )}
+                          <button onClick={() => setConfirmDeleteId(t.id)} title="Excluir" style={{ color: "var(--muted-foreground)" }}>
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -381,11 +436,18 @@ export function Financial() {
                     placeholder={ph as string}
                     value={(form as any)[key as string]}
                     onChange={(e) => setForm({ ...form, [key as string]: e.target.value })}
+                    list={key === "category" ? "category-suggestions" : undefined}
                     className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
                     style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
                   />
                 </div>
               ))}
+              <datalist id="category-suggestions">
+                {Array.from(new Set([
+                  "Serviços", "Pessoal", "Infraestrutura", "Marketing", "Ferramentas", "Impostos", "Equipamentos", "Assinaturas", "Outros",
+                  ...transactions.map((t) => t.cat).filter((c) => c && c !== "—"),
+                ])).map((c) => <option key={c} value={c} />)}
+              </datalist>
               <div>
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Forma de pagamento</label>
                 <select
