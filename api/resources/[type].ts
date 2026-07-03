@@ -196,7 +196,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     case "articles": {
       if (req.method === "GET") {
         const rows = await sql`
-          SELECT a.id, a.title, a.category_id, a.author_name, a.content, a.starred, a.updated_at, a.created_at,
+          SELECT a.id, a.title, a.category_id, a.author_name, a.content, a.starred, a.project_id, a.updated_at, a.created_at,
                  COALESCE((SELECT json_agg(t.tag) FROM knowledge_article_tags t WHERE t.article_id = a.id), '[]') AS tags
           FROM knowledge_articles a ORDER BY a.updated_at DESC
         `;
@@ -208,16 +208,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (body.fields) {
           const f = body.fields;
+          const authorName = niceName(user);
+
+          // Guarda uma cópia do estado atual antes de sobrescrever (histórico de versões)
+          const [current] = await sql`SELECT title, content FROM knowledge_articles WHERE id = ${body.id}`;
+          if (!current) return res.status(404).json({ error: "Artigo não encontrado" });
+          await sql`
+            INSERT INTO knowledge_article_revisions (article_id, title, content, author_name)
+            VALUES (${body.id}, ${current.title}, ${current.content}, ${authorName})
+          `;
+
           const [updated] = await sql`
             UPDATE knowledge_articles SET
               title = COALESCE(${f.title ?? null}, title),
               content = ${f.content ?? null},
               category_id = ${f.category_id ?? null},
+              project_id = ${f.project_id ?? null},
               updated_at = now()
             WHERE id = ${body.id}
             RETURNING id
           `;
-          if (!updated) return res.status(404).json({ error: "Artigo não encontrado" });
 
           if (Array.isArray(f.tags)) {
             await sql`DELETE FROM knowledge_article_tags WHERE article_id = ${body.id}`;
@@ -226,7 +236,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             }
           }
           const [full] = await sql`
-            SELECT a.id, a.title, a.category_id, a.author_name, a.content, a.starred, a.updated_at, a.created_at,
+            SELECT a.id, a.title, a.category_id, a.author_name, a.content, a.starred, a.project_id, a.updated_at, a.created_at,
+                   COALESCE((SELECT json_agg(t.tag) FROM knowledge_article_tags t WHERE t.article_id = a.id), '[]') AS tags
+            FROM knowledge_articles a WHERE a.id = ${body.id}
+          `;
+          return res.status(200).json(full);
+        }
+
+        if (body.restoreRevisionId) {
+          const [rev] = await sql`SELECT title, content FROM knowledge_article_revisions WHERE id = ${body.restoreRevisionId} AND article_id = ${body.id}`;
+          if (!rev) return res.status(404).json({ error: "Versão não encontrada" });
+          const authorName = niceName(user);
+          const [current] = await sql`SELECT title, content FROM knowledge_articles WHERE id = ${body.id}`;
+          if (!current) return res.status(404).json({ error: "Artigo não encontrado" });
+          await sql`
+            INSERT INTO knowledge_article_revisions (article_id, title, content, author_name)
+            VALUES (${body.id}, ${current.title}, ${current.content}, ${authorName})
+          `;
+          const [updated] = await sql`
+            UPDATE knowledge_articles SET title = ${rev.title}, content = ${rev.content}, updated_at = now()
+            WHERE id = ${body.id} RETURNING id
+          `;
+          const [full] = await sql`
+            SELECT a.id, a.title, a.category_id, a.author_name, a.content, a.starred, a.project_id, a.updated_at, a.created_at,
                    COALESCE((SELECT json_agg(t.tag) FROM knowledge_article_tags t WHERE t.article_id = a.id), '[]') AS tags
             FROM knowledge_articles a WHERE a.id = ${body.id}
           `;
@@ -236,11 +268,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (body.starred !== undefined) {
           const [updated] = await sql`
             UPDATE knowledge_articles SET starred = ${body.starred}, updated_at = now() WHERE id = ${body.id}
-            RETURNING id, title, category_id, author_name, content, starred, updated_at, created_at
+            RETURNING id, title, category_id, author_name, content, starred, project_id, updated_at, created_at
           `;
           if (!updated) return res.status(404).json({ error: "Artigo não encontrado" });
           const [full] = await sql`
-            SELECT a.id, a.title, a.category_id, a.author_name, a.content, a.starred, a.updated_at, a.created_at,
+            SELECT a.id, a.title, a.category_id, a.author_name, a.content, a.starred, a.project_id, a.updated_at, a.created_at,
                    COALESCE((SELECT json_agg(t.tag) FROM knowledge_article_tags t WHERE t.article_id = a.id), '[]') AS tags
             FROM knowledge_articles a WHERE a.id = ${body.id}
           `;
@@ -254,12 +286,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await sql`DELETE FROM knowledge_articles WHERE id = ${artId}`;
         return res.status(204).end();
       }
-      const { title, content, tags, category_id } = req.body ?? {};
+      const { title, content, tags, category_id, project_id } = req.body ?? {};
       if (!title) return res.status(400).json({ error: "Título é obrigatório" });
       const authorName = niceName(user);
       const [article] = await sql`
-        INSERT INTO knowledge_articles (title, author_name, content, starred, category_id)
-        VALUES (${title}, ${authorName}, ${content ?? null}, false, ${category_id ?? null})
+        INSERT INTO knowledge_articles (title, author_name, content, starred, category_id, project_id)
+        VALUES (${title}, ${authorName}, ${content ?? null}, false, ${category_id ?? null}, ${project_id ?? null})
         RETURNING id
       `;
       if (Array.isArray(tags)) {
@@ -268,7 +300,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
       const [full] = await sql`
-        SELECT a.id, a.title, a.category_id, a.author_name, a.content, a.starred, a.updated_at, a.created_at,
+        SELECT a.id, a.title, a.category_id, a.author_name, a.content, a.starred, a.project_id, a.updated_at, a.created_at,
                COALESCE((SELECT json_agg(t.tag) FROM knowledge_article_tags t WHERE t.article_id = a.id), '[]') AS tags
         FROM knowledge_articles a WHERE a.id = ${article.id}
       `;
@@ -339,6 +371,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         FROM content_posts p WHERE p.id = ${post.id}
       `;
       return res.status(201).json(full);
+    }
+
+    case "article-revisions": {
+      if (req.method === "GET") {
+        const articleId = Number(req.query.articleId);
+        if (!articleId) return res.status(400).json({ error: "articleId é obrigatório" });
+        const rows = await sql`
+          SELECT id, article_id, title, content, author_name, created_at
+          FROM knowledge_article_revisions WHERE article_id = ${articleId} ORDER BY created_at DESC
+        `;
+        return res.status(200).json(rows);
+      }
+      res.setHeader("Allow", "GET");
+      return res.status(405).json({ error: "Método não permitido" });
     }
 
     case "article-files": {

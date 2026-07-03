@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { Search, Plus, Star, Clock, ChevronRight, FileText, Folder, Tag, X, BookOpen, Loader2, Pencil, Trash2, Paperclip, Download } from "lucide-react";
-import { articlesApi, articleFilesApi, type Article as ApiArticle, type ArticleFile } from "../../lib/api";
+import { Search, Plus, Star, Clock, ChevronRight, FileText, Folder, Tag, X, BookOpen, Loader2, Pencil, Trash2, Paperclip, Download, History, RotateCcw } from "lucide-react";
+import { articlesApi, articleFilesApi, articleRevisionsApi, projectsApi, type Article as ApiArticle, type ArticleFile, type ArticleRevision, type Project } from "../../lib/api";
 import { supabase, PROJECT_FILES_BUCKET } from "../../lib/supabase";
 
 const categories = [
@@ -23,6 +23,7 @@ interface UiArticle {
   tags: string[];
   content: string;
   starred: boolean;
+  projectId: number | null;
 }
 
 function toUiArticle(a: ApiArticle): UiArticle {
@@ -36,10 +37,11 @@ function toUiArticle(a: ApiArticle): UiArticle {
     tags: a.tags ?? [],
     content: a.content ?? "",
     starred: a.starred,
+    projectId: a.project_id,
   };
 }
 
-const emptyForm = { title: "", content: "", tagsRaw: "", category_id: "" };
+const emptyForm = { title: "", content: "", tagsRaw: "", category_id: "", project_id: "" };
 
 export function Knowledge() {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -58,6 +60,11 @@ export function Knowledge() {
   const [files, setFiles] = useState<ArticleFile[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [revisions, setRevisions] = useState<ArticleRevision[]>([]);
+  const [revisionsLoading, setRevisionsLoading] = useState(false);
+  const [viewingRevision, setViewingRevision] = useState<ArticleRevision | null>(null);
+  const [restoringId, setRestoringId] = useState<number | null>(null);
 
   const loadArticles = useCallback(async () => {
     setLoading(true);
@@ -76,7 +83,45 @@ export function Knowledge() {
 
   useEffect(() => {
     loadArticles();
+    projectsApi.list().then(setProjects).catch(() => {});
   }, [loadArticles]);
+
+  function projectName(id: number | null) {
+    if (!id) return null;
+    return projects.find((p) => p.id === id)?.name ?? null;
+  }
+
+  const loadRevisions = useCallback(async (articleId: number) => {
+    setRevisionsLoading(true);
+    try {
+      setRevisions(await articleRevisionsApi.list(articleId));
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível carregar o histórico.");
+    } finally {
+      setRevisionsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedArticle) loadRevisions(selectedArticle.id);
+    else setRevisions([]);
+  }, [selectedArticle?.id, loadRevisions]);
+
+  async function handleRestoreRevision(revisionId: number) {
+    if (!selectedArticle) return;
+    setRestoringId(revisionId);
+    try {
+      const updated = await articlesApi.restoreRevision(selectedArticle.id, revisionId);
+      setSelectedArticle(toUiArticle(updated));
+      setViewingRevision(null);
+      await loadArticles();
+      await loadRevisions(selectedArticle.id);
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível restaurar essa versão.");
+    } finally {
+      setRestoringId(null);
+    }
+  }
 
   const loadFiles = useCallback(async (articleId: number) => {
     setFilesLoading(true);
@@ -139,11 +184,12 @@ export function Knowledge() {
     setSaving(true);
     try {
       const tags = form.tagsRaw.split(",").map((t) => t.trim()).filter(Boolean);
+      const projectId = form.project_id ? Number(form.project_id) : null;
       if (editingId) {
-        const updated = await articlesApi.update(editingId, { title: form.title, content: form.content, category_id: form.category_id || null, tags });
+        const updated = await articlesApi.update(editingId, { title: form.title, content: form.content, category_id: form.category_id || null, project_id: projectId, tags } as any);
         if (selectedArticle?.id === editingId) setSelectedArticle(toUiArticle(updated));
       } else {
-        await articlesApi.create({ title: form.title, content: form.content, tags, category_id: form.category_id || null });
+        await articlesApi.create({ title: form.title, content: form.content, tags, category_id: form.category_id || null, project_id: projectId });
       }
       setForm(emptyForm);
       setEditingId(null);
@@ -164,7 +210,7 @@ export function Knowledge() {
 
   function openEditModal(a: UiArticle) {
     setEditingId(a.id);
-    setForm({ title: a.title, content: a.content, tagsRaw: a.tags.join(", "), category_id: a.cat ?? "" });
+    setForm({ title: a.title, content: a.content, tagsRaw: a.tags.join(", "), category_id: a.cat ?? "", project_id: a.projectId ? String(a.projectId) : "" });
     setShowModal(true);
   }
 
@@ -293,6 +339,11 @@ export function Knowledge() {
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: "var(--accent)", color: "var(--accent-foreground)" }}>{selectedArticle.catLabel}</span>
+                  {projectName(selectedArticle.projectId) && (
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: "var(--muted)", color: "var(--muted-foreground)" }}>
+                      📁 {projectName(selectedArticle.projectId)}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-1">
                   <button onClick={handleToggleStar} disabled={togglingStar} title={selectedArticle.starred ? "Remover dos favoritos" : "Favoritar"} className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted">
@@ -370,6 +421,39 @@ export function Knowledge() {
                 )}
               </div>
             </div>
+
+            <div className="mt-8 pt-6 border-t" style={{ borderColor: "var(--border)" }}>
+              <div className="flex items-center gap-2 text-sm font-semibold mb-3" style={{ color: "var(--foreground)" }}>
+                <History size={14} />Histórico de versões
+              </div>
+              {revisionsLoading && <div className="text-xs flex items-center gap-2" style={{ color: "var(--muted-foreground)" }}><Loader2 size={12} className="animate-spin" />Carregando...</div>}
+              <div className="space-y-2">
+                {revisions.map((r) => (
+                  <div key={r.id} className="flex items-center gap-3 p-3 rounded-xl border" style={{ borderColor: "var(--border)" }}>
+                    <Clock size={14} style={{ color: "var(--muted-foreground)" }} className="flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate" style={{ color: "var(--foreground)" }}>{r.title}</div>
+                      <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>{r.author_name ?? "—"} · {new Date(r.created_at).toLocaleString("pt-BR")}</div>
+                    </div>
+                    <button onClick={() => setViewingRevision(r)} className="text-xs px-2 py-1 rounded-md font-semibold flex-shrink-0" style={{ background: "var(--muted)", color: "var(--foreground)" }}>
+                      Ver
+                    </button>
+                    <button
+                      onClick={() => handleRestoreRevision(r.id)}
+                      disabled={restoringId === r.id}
+                      title="Restaurar essa versão"
+                      className="flex-shrink-0 disabled:opacity-60"
+                      style={{ color: "var(--primary)" }}
+                    >
+                      {restoringId === r.id ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+                    </button>
+                  </div>
+                ))}
+                {!revisionsLoading && revisions.length === 0 && (
+                  <div className="text-xs text-center py-4" style={{ color: "var(--muted-foreground)" }}>Nenhuma edição anterior registrada ainda.</div>
+                )}
+              </div>
+            </div>
           </div>
         ) : (
           <div className="flex items-center justify-center h-full" style={{ color: "var(--muted-foreground)" }}>
@@ -413,6 +497,18 @@ export function Knowledge() {
                 </select>
               </div>
               <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Projeto (opcional)</label>
+                <select
+                  value={form.project_id}
+                  onChange={(e) => setForm({ ...form, project_id: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                >
+                  <option value="">Nenhum</option>
+                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
+              <div>
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Conteúdo</label>
                 <textarea
                   rows={4}
@@ -445,6 +541,37 @@ export function Knowledge() {
               >
                 {saving && <Loader2 size={13} className="animate-spin" />}
                 {editingId ? "Salvar alterações" : "Criar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {viewingRevision && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.4)" }}>
+          <div className="w-full max-w-lg max-h-[80vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col" style={{ background: "var(--card)" }}>
+            <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
+              <div>
+                <h3 className="font-bold" style={{ color: "var(--foreground)" }}>{viewingRevision.title}</h3>
+                <p className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
+                  Versão de {viewingRevision.author_name ?? "—"} · {new Date(viewingRevision.created_at).toLocaleString("pt-BR")}
+                </p>
+              </div>
+              <button onClick={() => setViewingRevision(null)} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
+            </div>
+            <div className="p-6 overflow-y-auto text-sm whitespace-pre-wrap" style={{ color: "var(--foreground)", scrollbarWidth: "none" }}>
+              {viewingRevision.content || "(sem conteúdo)"}
+            </div>
+            <div className="flex gap-3 px-6 pb-6 flex-shrink-0">
+              <button onClick={() => setViewingRevision(null)} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Fechar</button>
+              <button
+                onClick={() => handleRestoreRevision(viewingRevision.id)}
+                disabled={restoringId === viewingRevision.id}
+                className="flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+                style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+              >
+                {restoringId === viewingRevision.id && <Loader2 size={13} className="animate-spin" />}
+                Restaurar essa versão
               </button>
             </div>
           </div>

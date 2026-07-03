@@ -196,6 +196,7 @@ export interface Article {
   author_name: string | null;
   content: string | null;
   starred: boolean;
+  project_id: number | null;
   updated_at: string;
   created_at: string;
   tags: string[];
@@ -508,12 +509,36 @@ export const articlesApi = {
     });
     return handleResponse(res);
   },
+  async restoreRevision(articleId: number, revisionId: number) {
+    const res = await fetch("/api/resources/articles", {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ id: articleId, restoreRevisionId: revisionId }),
+    });
+    return handleResponse(res);
+  },
   async remove(id: number) {
     const res = await fetch(`/api/resources/articles?id=${id}`, {
       method: "DELETE",
       headers: await authHeaders(),
     });
     await handleResponse(res);
+  },
+};
+
+export interface ArticleRevision {
+  id: number;
+  article_id: number;
+  title: string;
+  content: string | null;
+  author_name: string | null;
+  created_at: string;
+}
+
+export const articleRevisionsApi = {
+  async list(articleId: number): Promise<ArticleRevision[]> {
+    const res = await fetch(`/api/resources/article-revisions?articleId=${articleId}`, { headers: await authHeaders() });
+    return handleResponse(res);
   },
 };
 
