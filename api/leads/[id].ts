@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { sql } from "../_lib/db";
-import { verifyAuth } from "../_lib/auth";
+import { sql } from "../_lib/db.js";
+import { verifyAuth } from "../_lib/auth.js";
 
 const STAGE_ORDER = ["new", "contact", "qualify", "proposal", "negotiation", "won"];
 
