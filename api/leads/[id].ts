@@ -1,8 +1,13 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { sql } from "../_lib/db.js";
-import { verifyAuth } from "../_lib/auth.js";
+import { verifyAuth, niceName } from "../_lib/auth.js";
 
 const STAGE_ORDER = ["new", "contact", "qualify", "proposal", "negotiation", "won"];
+const STAGE_LABELS: Record<string, string> = {
+  new: "Novo lead", contact: "Primeiro contato", qualify: "Qualificação",
+  proposal: "Proposta enviada", negotiation: "Negociação", won: "Cliente conquistado", lost: "Lead perdido",
+};
+
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const user = await verifyAuth(req.headers.authorization);
@@ -31,8 +36,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const [updated] = await sql`
         UPDATE crm_leads SET stage = ${nextStage}, updated_at = now()
         WHERE id = ${id}
-        RETURNING id, name, company, phone, email, origin, interest, value, responsible_name, last_contact, next_action, stage, created_at
+        RETURNING id, name, company, phone, email, origin, interest, value, responsible_name, last_contact, next_action, stage, description, created_at
       `;
+      if (nextStage !== current.stage) {
+        await sql`INSERT INTO crm_lead_activities (lead_id, note, author_name) VALUES (${id}, ${`Movido para "${STAGE_LABELS[nextStage] ?? nextStage}"`}, ${niceName(user)})`;
+      }
       return res.status(200).json(updated);
     }
 
@@ -41,9 +49,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const [updated] = await sql`
         UPDATE crm_leads SET stage = ${body.stage}, updated_at = now()
         WHERE id = ${id}
-        RETURNING id, name, company, phone, email, origin, interest, value, responsible_name, last_contact, next_action, stage, created_at
+        RETURNING id, name, company, phone, email, origin, interest, value, responsible_name, last_contact, next_action, stage, description, created_at
       `;
       if (!updated) return res.status(404).json({ error: "Lead não encontrado" });
+      await sql`INSERT INTO crm_lead_activities (lead_id, note, author_name) VALUES (${id}, ${`Movido para "${STAGE_LABELS[body.stage] ?? body.stage}"`}, ${niceName(user)})`;
+      return res.status(200).json(updated);
+    }
+
+    // Edição geral dos campos do lead
+    if (body.fields) {
+      const f = body.fields;
+      const [updated] = await sql`
+        UPDATE crm_leads SET
+          name = COALESCE(${f.name ?? null}, name),
+          company = ${f.company ?? null},
+          phone = ${f.phone ?? null},
+          email = ${f.email ?? null},
+          origin = ${f.origin ?? null},
+          interest = ${f.interest ?? null},
+          value = COALESCE(${f.value ?? null}, value),
+          next_action = ${f.next_action ?? null},
+          description = ${f.description ?? null},
+          updated_at = now()
+        WHERE id = ${id}
+        RETURNING id, name, company, phone, email, origin, interest, value, responsible_name, last_contact, next_action, stage, description, created_at
+      `;
+      if (!updated) return res.status(404).json({ error: "Lead não encontrado" });
+      await sql`INSERT INTO crm_lead_activities (lead_id, note, author_name) VALUES (${id}, 'Dados do lead atualizados', ${niceName(user)})`;
       return res.status(200).json(updated);
     }
 

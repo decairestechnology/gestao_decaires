@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { sql } from "../_lib/db.js";
-import { verifyAuth } from "../_lib/auth.js";
+import { verifyAuth, niceName } from "../_lib/auth.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const user = await verifyAuth(req.headers.authorization);
@@ -11,7 +11,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === "GET") {
     const leads = await sql`
       SELECT id, name, company, phone, email, origin, interest, value,
-             responsible_name, last_contact, next_action, stage, created_at
+             responsible_name, last_contact, next_action, stage, description, created_at
       FROM crm_leads
       ORDER BY created_at DESC
     `;
@@ -19,19 +19,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.method === "POST") {
-    const { name, company, phone, email, origin, interest, value, next_action } = req.body ?? {};
+    const { name, company, phone, email, origin, interest, value, next_action, description } = req.body ?? {};
 
     if (!name) {
       return res.status(400).json({ error: "Nome é obrigatório" });
     }
 
-    const responsibleName = user.name || user.email || "Equipe";
+    const responsibleName = niceName(user);
 
     const [lead] = await sql`
-      INSERT INTO crm_leads (name, company, phone, email, origin, interest, value, responsible_name, last_contact, next_action, stage)
-      VALUES (${name}, ${company ?? null}, ${phone ?? null}, ${email ?? null}, ${origin ?? null}, ${interest ?? null}, ${value ?? 0}, ${responsibleName}, CURRENT_DATE, ${next_action ?? null}, 'new')
-      RETURNING id, name, company, phone, email, origin, interest, value, responsible_name, last_contact, next_action, stage, created_at
+      INSERT INTO crm_leads (name, company, phone, email, origin, interest, value, responsible_name, last_contact, next_action, stage, description)
+      VALUES (${name}, ${company ?? null}, ${phone ?? null}, ${email ?? null}, ${origin ?? null}, ${interest ?? null}, ${value ?? 0}, ${responsibleName}, CURRENT_DATE, ${next_action ?? null}, 'new', ${description ?? null})
+      RETURNING id, name, company, phone, email, origin, interest, value, responsible_name, last_contact, next_action, stage, description, created_at
     `;
+
+    await sql`INSERT INTO crm_lead_activities (lead_id, note, author_name) VALUES (${lead.id}, 'Lead cadastrado', ${responsibleName})`;
+
     return res.status(201).json(lead);
   }
 

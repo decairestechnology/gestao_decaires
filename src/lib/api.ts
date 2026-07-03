@@ -30,6 +30,7 @@ export interface Lead {
   last_contact: string | null;
   next_action: string | null;
   stage: string;
+  description: string | null;
   created_at: string;
 }
 
@@ -66,6 +67,15 @@ export const leadsApi = {
     return handleResponse(res);
   },
 
+  async update(id: number, fields: Partial<Lead>): Promise<Lead> {
+    const res = await fetch(`/api/leads/${id}`, {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ fields }),
+    });
+    return handleResponse(res);
+  },
+
   async remove(id: number): Promise<void> {
     const res = await fetch(`/api/leads/${id}`, {
       method: "DELETE",
@@ -73,7 +83,28 @@ export const leadsApi = {
     });
     await handleResponse(res);
   },
+
+  async listActivities(id: number): Promise<LeadActivity[]> {
+    const res = await fetch(`/api/leads/${id}/activities`, { headers: await authHeaders() });
+    return handleResponse(res);
+  },
+
+  async addActivity(id: number, note: string): Promise<LeadActivity> {
+    const res = await fetch(`/api/leads/${id}/activities`, {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify({ note }),
+    });
+    return handleResponse(res);
+  },
 };
+
+export interface LeadActivity {
+  id: number;
+  note: string;
+  author_name: string | null;
+  created_at: string;
+}
 
 export interface Project {
   id: number;

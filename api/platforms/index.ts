@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { sql } from "../_lib/db.js";
-import { verifyAuth } from "../_lib/auth.js";
+import { verifyAuth, niceName } from "../_lib/auth.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const user = await verifyAuth(req.headers.authorization);
@@ -22,7 +22,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { name, description, category, tech } = req.body ?? {};
     if (!name) return res.status(400).json({ error: "Nome é obrigatório" });
 
-    const responsibleName = user.name || user.email || "Equipe";
+    const responsibleName = niceName(user);
     const [platform] = await sql`
       INSERT INTO platforms (name, description, category, status, responsible_name, users_count, revenue, monthly_costs)
       VALUES (${name}, ${description ?? null}, ${category ?? null}, 'Ideia', ${responsibleName}, 0, 0, 0)

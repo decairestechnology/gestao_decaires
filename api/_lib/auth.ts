@@ -13,6 +13,15 @@ export interface AuthUser {
 }
 
 /**
+ * Nome amigável pra gravar como "responsável"/"autor": prioriza o nome de exibição
+ * do Firebase; se a pessoa ainda não configurou um nome, usa a parte antes do @
+ * do e-mail (em vez do e-mail inteiro, que fica feio nas telas).
+ */
+export function niceName(user: AuthUser): string {
+  return user.name || user.email?.split("@")[0] || "Equipe";
+}
+
+/**
  * Confere o token de login (Firebase ID token) que o front manda no header Authorization.
  * Retorna os dados do usuário se for válido, ou null se não for.
  */

@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { sql } from "../_lib/db.js";
-import { verifyAuth } from "../_lib/auth.js";
+import { verifyAuth, niceName } from "../_lib/auth.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const user = await verifyAuth(req.headers.authorization);
@@ -25,7 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { title, description, deadline, priority, category, okrs } = req.body ?? {};
     if (!title) return res.status(400).json({ error: "Título é obrigatório" });
 
-    const responsibleName = user.name || user.email || "Equipe";
+    const responsibleName = niceName(user);
     const [goal] = await sql`
       INSERT INTO goals (title, description, responsible_name, deadline, progress, priority, status, category)
       VALUES (${title}, ${description ?? null}, ${responsibleName}, ${deadline || null}, 0, ${priority || "Média"}, 'Em andamento', ${category ?? null})

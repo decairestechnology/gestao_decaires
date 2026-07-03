@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { sql } from "../_lib/db.js";
-import { verifyAuth } from "../_lib/auth.js";
+import { verifyAuth, niceName } from "../_lib/auth.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const user = await verifyAuth(req.headers.authorization);
@@ -23,7 +23,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { title, content, tags } = req.body ?? {};
     if (!title) return res.status(400).json({ error: "Título é obrigatório" });
 
-    const authorName = user.name || user.email || "Equipe";
+    const authorName = niceName(user);
     const [article] = await sql`
       INSERT INTO knowledge_articles (title, author_name, content, starred)
       VALUES (${title}, ${authorName}, ${content ?? null}, false)
