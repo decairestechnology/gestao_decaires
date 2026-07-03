@@ -58,6 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     FROM projects
     GROUP BY status
   `;
+  const recentProjects = await sql`
     SELECT id, name, client, progress, status FROM projects ORDER BY created_at DESC LIMIT 5
   `;
 
