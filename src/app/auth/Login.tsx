@@ -18,7 +18,7 @@ function mapAuthError(code: string): string {
 }
 
 export function Login() {
-  const { loginWithEmail, loginWithGoogle } = useAuth();
+  const { loginWithEmail } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -37,17 +37,6 @@ export function Login() {
     }
   }
 
-  async function handleGoogle() {
-    setError(null);
-    setLoading(true);
-    try {
-      await loginWithGoogle();
-    } catch (err: any) {
-      setError(err?.message ?? mapAuthError(err?.code ?? ""));
-    } finally {
-      setLoading(false);
-    }
-  }
 
   return (
     <div
@@ -119,28 +108,6 @@ export function Login() {
             Entrar
           </button>
         </form>
-
-        <div className="flex items-center gap-3 my-4">
-          <div className="flex-1 h-px" style={{ background: "var(--border)" }} />
-          <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>ou</span>
-          <div className="flex-1 h-px" style={{ background: "var(--border)" }} />
-        </div>
-
-        <button
-          type="button"
-          onClick={handleGoogle}
-          disabled={loading}
-          className="w-full flex items-center justify-center gap-2 text-sm font-semibold py-2.5 rounded-lg border transition hover:bg-black/5 disabled:opacity-60"
-          style={{ borderColor: "var(--border)", color: "var(--foreground)" }}
-        >
-          <svg width="16" height="16" viewBox="0 0 48 48">
-            <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.6 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l6-6C34.5 5.5 29.5 3.5 24 3.5 12.7 3.5 3.5 12.7 3.5 24S12.7 44.5 24 44.5c11.3 0 20.5-9.2 20.5-20.5 0-1.4-.1-2.7-.4-4z"/>
-            <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.5 15.9 18.9 13.5 24 13.5c3.1 0 5.9 1.2 8 3.1l6-6C34.5 7 29.5 5 24 5c-7.6 0-14.1 4.3-17.7 10.7z"/>
-            <path fill="#4CAF50" d="M24 44.5c5.4 0 10.3-1.8 14-5l-6.5-5.5c-2 1.5-4.6 2.5-7.5 2.5-5.2 0-9.7-3.4-11.3-8.1l-6.6 5C9.9 40.1 16.4 44.5 24 44.5z"/>
-            <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.3 4.2-4.3 5.6l6.5 5.5c-.5.4 6.9-5 6.9-15.6 0-1.4-.1-2.7-.4-4z"/>
-          </svg>
-          Entrar com Google
-        </button>
       </div>
     </div>
   );
