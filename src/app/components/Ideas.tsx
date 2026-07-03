@@ -4,11 +4,7 @@ import { ideasApi, type Idea as ApiIdea } from "../../lib/api";
 
 const statusColors: Record<string, { bg: string; text: string }> = {
   Nova: { bg: "#E0F9FF", text: "#0E7490" },
-  "Em análise": { bg: "#F5F3FF", text: "#7C3AED" },
-  Validando: { bg: "#FFFBEB", text: "#B45309" },
-  Aprovada: { bg: "#ECFDF5", text: "#065F46" },
   "Em desenvolvimento": { bg: "#EFF6FF", text: "#1D4ED8" },
-  Arquivada: { bg: "#F1F5F9", text: "#475569" },
   Cancelada: { bg: "#FEF2F2", text: "#991B1B" },
 };
 
@@ -101,7 +97,6 @@ export function Ideas() {
   const [converting, setConverting] = useState(false);
   const [scoreDraft, setScoreDraft] = useState<UiIdea["scores"] | null>(null);
   const [savingScores, setSavingScores] = useState(false);
-  const [changingStatus, setChangingStatus] = useState(false);
   const [showCancelBox, setShowCancelBox] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
@@ -249,15 +244,12 @@ export function Ideas() {
 
   async function handleChangeStatus(status: string) {
     if (!selected) return;
-    setChangingStatus(true);
     try {
       const updated = await ideasApi.updateStatus(selected.id, status);
       setSelected(toUiIdea(updated));
       await loadIdeas();
     } catch (err: any) {
       setError(err?.message ?? "Não foi possível mudar o status.");
-    } finally {
-      setChangingStatus(false);
     }
   }
 
@@ -368,32 +360,6 @@ export function Ideas() {
                   </div>
                 ))}
               </div>
-              <div>
-                <div className="font-semibold text-sm mb-2" style={{ color: "var(--foreground)" }}>Status no fluxo</div>
-                <div className="flex flex-wrap gap-2">
-                  {["Nova", "Em análise", "Validando", "Aprovada", "Arquivada"].map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => handleChangeStatus(s)}
-                      disabled={changingStatus || selected.status === s}
-                      className="text-xs px-3 py-1.5 rounded-lg font-semibold disabled:cursor-default transition-opacity"
-                      style={{
-                        background: selected.status === s ? statusColors[s]?.bg : "var(--muted)",
-                        color: selected.status === s ? statusColors[s]?.text : "var(--muted-foreground)",
-                        opacity: changingStatus ? 0.6 : 1,
-                      }}
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-                {(selected.status === "Cancelada" || selected.status === "Em desenvolvimento") && (
-                  <p className="text-xs mt-2" style={{ color: "var(--muted-foreground)" }}>
-                    {selected.status === "Em desenvolvimento" ? "Essa ideia já virou projeto — o fluxo acima não se aplica mais." : "Reative a ideia (botão abaixo) pra voltar ao fluxo normal."}
-                  </p>
-                )}
-              </div>
-
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="font-semibold text-sm" style={{ color: "var(--foreground)" }}>Avaliação</div>
