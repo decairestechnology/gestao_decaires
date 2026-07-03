@@ -134,6 +134,8 @@ export interface Transaction {
   value: string;
   payment_method: string | null;
   status: string;
+  is_recurring: boolean;
+  recurring_source_id: number | null;
   created_at: string;
 }
 
@@ -391,6 +393,14 @@ export const transactionsApi = {
       method: "PATCH",
       headers: await authHeaders(),
       body: JSON.stringify({ id, status }),
+    });
+    return handleResponse(res);
+  },
+  async update(id: number, fields: Partial<Transaction>) {
+    const res = await fetch("/api/resources/transactions", {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ id, fields }),
     });
     return handleResponse(res);
   },

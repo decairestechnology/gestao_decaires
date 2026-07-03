@@ -17,18 +17,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     case "transactions": {
       if (req.method === "GET") {
         const rows = await sql`
-          SELECT id, date, description, category, project_id, client, type, value, payment_method, status, created_at
+          SELECT id, date, description, category, project_id, client, type, value, payment_method, status,
+                 is_recurring, recurring_source_id, created_at
           FROM financial_transactions ORDER BY date DESC, created_at DESC
         `;
         return res.status(200).json(rows);
       }
       if (req.method === "PATCH") {
-        const { id: txId, status: newStatus } = req.body ?? {};
+        const body = req.body ?? {};
+
+        if (body.fields) {
+          const f = body.fields;
+          if (!body.id) return res.status(400).json({ error: "id é obrigatório" });
+          const [updated] = await sql`
+            UPDATE financial_transactions SET
+              description = COALESCE(${f.description ?? null}, description),
+              category = ${f.category ?? null},
+              client = ${f.client ?? null},
+              type = COALESCE(${f.type ?? null}, type),
+              value = COALESCE(${f.value ?? null}, value),
+              payment_method = ${f.payment_method ?? null},
+              date = COALESCE(${f.date ?? null}, date),
+              is_recurring = COALESCE(${f.is_recurring ?? null}, is_recurring)
+            WHERE id = ${body.id}
+            RETURNING id, date, description, category, project_id, client, type, value, payment_method, status, is_recurring, recurring_source_id, created_at
+          `;
+          if (!updated) return res.status(404).json({ error: "Lançamento não encontrado" });
+          return res.status(200).json(updated);
+        }
+
+        const { id: txId, status: newStatus } = body;
         if (!txId || !newStatus) return res.status(400).json({ error: "id e status são obrigatórios" });
         const [updated] = await sql`
           UPDATE financial_transactions SET status = ${newStatus}
           WHERE id = ${txId}
-          RETURNING id, date, description, category, project_id, client, type, value, payment_method, status, created_at
+          RETURNING id, date, description, category, project_id, client, type, value, payment_method, status, is_recurring, recurring_source_id, created_at
         `;
         if (!updated) return res.status(404).json({ error: "Lançamento não encontrado" });
         return res.status(200).json(updated);
@@ -39,14 +62,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await sql`DELETE FROM financial_transactions WHERE id = ${txId}`;
         return res.status(204).end();
       }
-      const { description, category, client, type: txType, value, payment_method, date, project_id, status: txStatus } = req.body ?? {};
+      const { description, category, client, type: txType, value, payment_method, date, project_id, status: txStatus, is_recurring, recurring_source_id } = req.body ?? {};
       if (!description || !txType || value === undefined) {
         return res.status(400).json({ error: "Descrição, tipo e valor são obrigatórios" });
       }
       const [tx] = await sql`
-        INSERT INTO financial_transactions (date, description, category, client, type, value, payment_method, status, project_id)
-        VALUES (${date || new Date().toISOString().slice(0, 10)}, ${description}, ${category ?? null}, ${client ?? null}, ${txType}, ${value}, ${payment_method ?? null}, ${txStatus || "Pendente"}, ${project_id ?? null})
-        RETURNING id, date, description, category, project_id, client, type, value, payment_method, status, created_at
+        INSERT INTO financial_transactions (date, description, category, client, type, value, payment_method, status, project_id, is_recurring, recurring_source_id)
+        VALUES (${date || new Date().toISOString().slice(0, 10)}, ${description}, ${category ?? null}, ${client ?? null}, ${txType}, ${value}, ${payment_method ?? null}, ${txStatus || "Pendente"}, ${project_id ?? null}, ${is_recurring ?? false}, ${recurring_source_id ?? null})
+        RETURNING id, date, description, category, project_id, client, type, value, payment_method, status, is_recurring, recurring_source_id, created_at
       `;
       return res.status(201).json(tx);
     }

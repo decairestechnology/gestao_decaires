@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Plus, Phone, Mail, X, ArrowRight, Loader2, Pencil, Trash2, Send } from "lucide-react";
-import { leadsApi, type Lead as ApiLead, type LeadActivity } from "../../lib/api";
+import { leadsApi, transactionsApi, type Lead as ApiLead, type LeadActivity } from "../../lib/api";
 
 const stages = [
   { id: "new", label: "Novo lead", color: "#64748B" },
@@ -59,6 +59,9 @@ export function CRM() {
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
   const [advancing, setAdvancing] = useState(false);
+  const [showRevenuePrompt, setShowRevenuePrompt] = useState(false);
+  const [revenueForm, setRevenueForm] = useState({ description: "", value: "" });
+  const [creatingRevenue, setCreatingRevenue] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [activities, setActivities] = useState<LeadActivity[]>([]);
@@ -99,6 +102,7 @@ export function CRM() {
     setSelected(lead);
     setConfirmDelete(false);
     setNewNote("");
+    setShowRevenuePrompt(false);
     loadActivities(lead.id);
   }
 
@@ -147,13 +151,38 @@ export function CRM() {
     setAdvancing(true);
     try {
       const updated = await leadsApi.advanceStage(selected.id);
-      setSelected(toUiLead(updated));
+      const ui = toUiLead(updated);
+      setSelected(ui);
       await loadLeads();
       await loadActivities(selected.id);
+      if (ui.stage === "won") {
+        setRevenueForm({ description: `Fechamento - ${ui.name}`, value: String(ui.value || "") });
+        setShowRevenuePrompt(true);
+      }
     } catch (err: any) {
       setError(err?.message ?? "Não foi possível avançar a etapa.");
     } finally {
       setAdvancing(false);
+    }
+  }
+
+  async function handleCreateRevenueFromLead() {
+    if (!selected || !revenueForm.description.trim() || !revenueForm.value) return;
+    setCreatingRevenue(true);
+    try {
+      await transactionsApi.create({
+        description: revenueForm.description,
+        value: Number(revenueForm.value),
+        type: "receita",
+        client: selected.company || selected.name,
+        category: "Serviços",
+        status: "Pendente",
+      });
+      setShowRevenuePrompt(false);
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível criar a receita no financeiro.");
+    } finally {
+      setCreatingRevenue(false);
     }
   }
 
@@ -321,6 +350,44 @@ export function CRM() {
                   })}
                 </div>
               </div>
+
+              {showRevenuePrompt && (
+                <div className="rounded-xl p-4 space-y-3" style={{ background: "#ECFDF5", border: "1px solid #10B98130" }}>
+                  <div className="text-sm font-bold" style={{ color: "#065F46" }}>🎉 Fechou! Quer já lançar essa receita no Financeiro?</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input
+                      value={revenueForm.description}
+                      onChange={(e) => setRevenueForm({ ...revenueForm, description: e.target.value })}
+                      placeholder="Descrição"
+                      className="px-3 py-2 rounded-lg text-sm border outline-none"
+                      style={{ background: "white", borderColor: "#10B98130" }}
+                    />
+                    <input
+                      type="number"
+                      value={revenueForm.value}
+                      onChange={(e) => setRevenueForm({ ...revenueForm, value: e.target.value })}
+                      placeholder="Valor (R$)"
+                      className="px-3 py-2 rounded-lg text-sm border outline-none"
+                      style={{ background: "white", borderColor: "#10B98130" }}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={() => setShowRevenuePrompt(false)} className="text-xs px-3 py-1.5 rounded-lg font-semibold" style={{ background: "white", color: "#065F46" }}>
+                      Agora não
+                    </button>
+                    <button
+                      onClick={handleCreateRevenueFromLead}
+                      disabled={creatingRevenue || !revenueForm.description.trim() || !revenueForm.value}
+                      className="text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 disabled:opacity-60"
+                      style={{ background: "#10B981", color: "white" }}
+                    >
+                      {creatingRevenue && <Loader2 size={11} className="animate-spin" />}
+                      Criar receita
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <div className="font-semibold text-sm mb-3" style={{ color: "var(--foreground)" }}>Histórico</div>
                 <div className="flex gap-2 mb-4">

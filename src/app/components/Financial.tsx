@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Plus, Download, TrendingUp, TrendingDown, Wallet, AlertCircle, X, Loader2, Trash2, BarChart3, LineChart as LineChartIcon, CheckCircle2 } from "lucide-react";
+import { Plus, Download, TrendingUp, TrendingDown, Wallet, AlertCircle, X, Loader2, Trash2, BarChart3, LineChart as LineChartIcon, CheckCircle2, Pencil } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { transactionsApi, type Transaction as ApiTransaction } from "../../lib/api";
 
@@ -17,6 +17,8 @@ interface UiTransaction {
   value: number;
   payment: string;
   status: string;
+  isRecurring: boolean;
+  recurringSourceId: number | null;
 }
 
 function toUiTransaction(t: ApiTransaction): UiTransaction {
@@ -31,6 +33,8 @@ function toUiTransaction(t: ApiTransaction): UiTransaction {
     value: Number(t.value) || 0,
     payment: t.payment_method ?? "—",
     status: t.status,
+    isRecurring: !!t.is_recurring,
+    recurringSourceId: t.recurring_source_id,
   };
 }
 
@@ -72,7 +76,7 @@ function PieBreakdown({ title, data, emptyText }: { title: string; data: { name:
   );
 }
 
-const emptyForm = { description: "", value: "", category: "", date: "", payment_method: "Transferência" };
+const emptyForm = { description: "", value: "", category: "", date: "", payment_method: "Transferência", is_recurring: false };
 
 export function Financial() {
   const [showModal, setShowModal] = useState<"receita" | "despesa" | null>(null);
@@ -86,6 +90,8 @@ export function Financial() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [generatingRecurring, setGeneratingRecurring] = useState(false);
 
   const loadTransactions = useCallback(async () => {
     setLoading(true);
@@ -108,14 +114,60 @@ export function Financial() {
     if (!showModal || !form.description.trim() || !form.value) return;
     setSaving(true);
     try {
-      await transactionsApi.create({ ...form, type: showModal, value: Number(form.value) });
+      if (editingId) {
+        await transactionsApi.update(editingId, { ...form, type: showModal, value: Number(form.value) } as any);
+      } else {
+        await transactionsApi.create({ ...form, type: showModal, value: Number(form.value) });
+      }
       setForm(emptyForm);
       setShowModal(null);
+      setEditingId(null);
       await loadTransactions();
     } catch (err: any) {
       setError(err?.message ?? "Não foi possível salvar o lançamento.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  function openEdit(t: UiTransaction) {
+    setEditingId(t.id);
+    setForm({
+      description: t.desc,
+      value: String(t.value),
+      category: t.cat === "—" ? "" : t.cat,
+      date: t.rawDate ? t.rawDate.slice(0, 10) : "",
+      payment_method: t.payment === "—" ? "Transferência" : t.payment,
+      is_recurring: t.isRecurring,
+    });
+    setShowModal(t.type as "receita" | "despesa");
+  }
+
+  // Modelos recorrentes: lançamentos marcados como "repete todo mês" que ainda
+  // não têm uma cópia gerada pro mês atual. (calculado mais abaixo, depois de isThisMonth)
+
+  async function handleGenerateRecurring() {
+    setGeneratingRecurring(true);
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      for (const tpl of pendingRecurringTemplates) {
+        await transactionsApi.create({
+          description: tpl.desc,
+          value: tpl.value,
+          category: tpl.cat === "—" ? "" : tpl.cat,
+          date: today,
+          payment_method: tpl.payment === "—" ? "Transferência" : tpl.payment,
+          type: tpl.type,
+          status: "Pendente",
+          is_recurring: false,
+          recurring_source_id: tpl.id,
+        });
+      }
+      await loadTransactions();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível gerar os lançamentos recorrentes.");
+    } finally {
+      setGeneratingRecurring(false);
     }
   }
 
@@ -235,11 +287,60 @@ export function Financial() {
   const aPagar = transactions.filter(t => t.status === "Pendente").reduce((a, t) => a + t.value, 0);
   const visibleTransactions = transactions.filter(isInPeriod);
 
+  const pendingRecurringTemplates = transactions.filter((t) => {
+    if (!t.isRecurring || t.recurringSourceId) return false;
+    const hasThisMonthCopy = transactions.some((x) => x.recurringSourceId === t.id && isThisMonth(x));
+    return !hasThisMonthCopy;
+  });
+
+  // Vencimentos: lançamentos ainda não confirmados, vencidos ou vencendo nos próximos 7 dias.
+  function daysUntil(rawDate: string): number | null {
+    const ym = yearMonth(rawDate);
+    if (!ym) return null;
+    const due = new Date(rawDate.slice(0, 10) + "T00:00:00");
+    const diffMs = due.setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0);
+    return Math.round(diffMs / (1000 * 60 * 60 * 24));
+  }
+  const dueSoonOrOverdue = transactions
+    .filter((t) => t.status !== "Confirmado")
+    .map((t) => ({ t, days: daysUntil(t.rawDate) }))
+    .filter((x) => x.days !== null && x.days <= 7)
+    .sort((a, b) => (a.days ?? 0) - (b.days ?? 0));
+  const overdueIds = new Set(dueSoonOrOverdue.filter((x) => (x.days ?? 0) < 0).map((x) => x.t.id));
+
   return (
     <div className="p-6 overflow-y-auto h-full" style={{ scrollbarWidth: "none" }}>
       {error && (
         <div className="mb-4 text-sm rounded-lg px-4 py-2.5" style={{ background: "#FEF2F2", color: "#991B1B" }}>
           {error}
+        </div>
+      )}
+
+      {pendingRecurringTemplates.length > 0 && (
+        <div className="mb-4 text-sm rounded-lg px-4 py-2.5 flex items-center justify-between gap-3 flex-wrap" style={{ background: "#F5F3FF", color: "#6D28D9" }}>
+          <span>Você tem {pendingRecurringTemplates.length} lançamento{pendingRecurringTemplates.length > 1 ? "s" : ""} recorrente{pendingRecurringTemplates.length > 1 ? "s" : ""} pra gerar esse mês.</span>
+          <button
+            onClick={handleGenerateRecurring}
+            disabled={generatingRecurring}
+            className="text-xs px-3 py-1.5 rounded-lg font-bold flex items-center gap-1.5 disabled:opacity-60"
+            style={{ background: "#7C3AED", color: "white" }}
+          >
+            {generatingRecurring && <Loader2 size={11} className="animate-spin" />}
+            Gerar agora
+          </button>
+        </div>
+      )}
+
+      {dueSoonOrOverdue.length > 0 && (
+        <div className="mb-4 text-sm rounded-lg px-4 py-2.5" style={{ background: "#FFFBEB", color: "#92400E" }}>
+          <div className="font-semibold mb-1">⚠️ {dueSoonOrOverdue.length} lançamento{dueSoonOrOverdue.length > 1 ? "s" : ""} vencido{dueSoonOrOverdue.length > 1 ? "s" : ""} ou vencendo em breve</div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+            {dueSoonOrOverdue.slice(0, 6).map(({ t, days }) => (
+              <span key={t.id}>
+                {t.desc} — {days! < 0 ? `venceu há ${Math.abs(days!)}d` : days === 0 ? "vence hoje" : `vence em ${days}d`}
+              </span>
+            ))}
+          </div>
         </div>
       )}
       {/* Controls */}
@@ -253,12 +354,12 @@ export function Financial() {
           <button onClick={handleExportCsv} className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm border font-medium transition-colors hover:bg-muted" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>
             <Download size={14} />Exportar
           </button>
-          <button onClick={() => setShowModal("despesa")}
+          <button onClick={() => { setEditingId(null); setForm(emptyForm); setShowModal("despesa"); }}
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold border transition hover:opacity-90"
             style={{ borderColor: "#EF4444", color: "#EF4444", background: "#FEF2F2" }}>
             <TrendingDown size={14} />Nova despesa
           </button>
-          <button onClick={() => setShowModal("receita")}
+          <button onClick={() => { setEditingId(null); setForm(emptyForm); setShowModal("receita"); }}
             className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition hover:opacity-90"
             style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>
             <TrendingUp size={14} />Nova receita
@@ -360,7 +461,9 @@ export function Financial() {
                 const confirmingDelete = confirmDeleteId === t.id;
                 return (
                   <tr key={t.id} className="border-b last:border-0 hover:bg-muted transition-colors" style={{ borderColor: "var(--border)" }}>
-                    <td className="px-4 py-3 text-xs" style={{ color: "var(--muted-foreground)" }}>{t.date}</td>
+                    <td className="px-4 py-3 text-xs" style={{ color: overdueIds.has(t.id) ? "#EF4444" : "var(--muted-foreground)", fontWeight: overdueIds.has(t.id) ? 700 : 400 }}>
+                      {t.date}{t.isRecurring && <span title="Recorrente"> 🔁</span>}
+                    </td>
                     <td className="px-4 py-3 text-xs font-medium" style={{ color: "var(--foreground)" }}>{t.desc}</td>
                     <td className="px-4 py-3 text-xs" style={{ color: "var(--muted-foreground)" }}>{t.cat}</td>
                     <td className="px-4 py-3 text-xs" style={{ color: "var(--muted-foreground)" }}>{t.project}</td>
@@ -403,6 +506,9 @@ export function Financial() {
                               {confirmingId === t.id ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
                             </button>
                           )}
+                          <button onClick={() => openEdit(t)} title="Editar" style={{ color: "var(--muted-foreground)" }}>
+                            <Pencil size={13} />
+                          </button>
                           <button onClick={() => setConfirmDeleteId(t.id)} title="Excluir" style={{ color: "var(--muted-foreground)" }}>
                             <Trash2 size={13} />
                           </button>
@@ -423,9 +529,9 @@ export function Financial() {
           <div className="w-full max-w-md rounded-2xl shadow-2xl overflow-hidden" style={{ background: "var(--card)" }}>
             <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: "var(--border)" }}>
               <h3 className="font-bold" style={{ color: "var(--foreground)" }}>
-                {showModal === "receita" ? "Nova Receita" : "Nova Despesa"}
+                {editingId ? "Editar Lançamento" : showModal === "receita" ? "Nova Receita" : "Nova Despesa"}
               </h3>
-              <button onClick={() => setShowModal(null)} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
+              <button onClick={() => { setShowModal(null); setForm(emptyForm); setEditingId(null); }} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
             </div>
             <div className="p-6 space-y-4">
               {[["Descrição", "text", "Ex: Pagamento Projeto X", "description"], ["Valor (R$)", "number", "0,00", "value"], ["Categoria", "text", "Ex: Serviços, Pessoal...", "category"], ["Data", "date", "", "date"]].map(([l, t, ph, key]) => (
@@ -459,9 +565,19 @@ export function Financial() {
                   {["Transferência", "Pix", "Cartão", "Boleto", "Dinheiro"].map(p => <option key={p}>{p}</option>)}
                 </select>
               </div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: "var(--foreground)" }}>
+                <input
+                  type="checkbox"
+                  checked={form.is_recurring}
+                  onChange={(e) => setForm({ ...form, is_recurring: e.target.checked })}
+                  className="w-4 h-4 rounded"
+                  style={{ accentColor: "var(--primary)" }}
+                />
+                Recorrente (repete todo mês)
+              </label>
             </div>
             <div className="flex gap-3 px-6 pb-6">
-              <button onClick={() => { setShowModal(null); setForm(emptyForm); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
+              <button onClick={() => { setShowModal(null); setForm(emptyForm); setEditingId(null); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
               <button
                 onClick={handleSaveTransaction}
                 disabled={saving || !form.description.trim() || !form.value}
@@ -469,7 +585,7 @@ export function Financial() {
                 style={{ background: showModal === "receita" ? "#10B981" : "#EF4444", color: "white" }}
               >
                 {saving && <Loader2 size={13} className="animate-spin" />}
-                Registrar {showModal === "receita" ? "receita" : "despesa"}
+                {editingId ? "Salvar alterações" : `Registrar ${showModal === "receita" ? "receita" : "despesa"}`}
               </button>
             </div>
           </div>
