@@ -77,7 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     case "events": {
       if (req.method === "GET") {
         const rows = await sql`
-          SELECT id, title, date, start_time, end_time, location, project_id, responsible_name, status, type, created_at
+          SELECT id, title, date, start_time, end_time, location, description, project_id, responsible_name, status, type, created_at
           FROM agenda_events ORDER BY date ASC, start_time ASC
         `;
         return res.status(200).json(rows);
@@ -94,10 +94,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               start_time = ${f.start_time ?? null},
               end_time = ${f.end_time ?? null},
               location = ${f.location ?? null},
+              description = ${f.description ?? null},
               type = COALESCE(${f.type ?? null}, type),
               project_id = ${f.project_id ?? null}
             WHERE id = ${body.id}
-            RETURNING id, title, date, start_time, end_time, location, project_id, responsible_name, status, type, created_at
+            RETURNING id, title, date, start_time, end_time, location, description, project_id, responsible_name, status, type, created_at
           `;
           if (!updated) return res.status(404).json({ error: "Evento não encontrado" });
           return res.status(200).json(updated);
@@ -105,7 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (body.status) {
           const [updated] = await sql`
             UPDATE agenda_events SET status = ${body.status} WHERE id = ${body.id}
-            RETURNING id, title, date, start_time, end_time, location, project_id, responsible_name, status, type, created_at
+            RETURNING id, title, date, start_time, end_time, location, description, project_id, responsible_name, status, type, created_at
           `;
           if (!updated) return res.status(404).json({ error: "Evento não encontrado" });
           return res.status(200).json(updated);
@@ -118,13 +119,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await sql`DELETE FROM agenda_events WHERE id = ${evId}`;
         return res.status(204).end();
       }
-      const { title, date, start_time, end_time, location, type: evType, project_id } = req.body ?? {};
+      const { title, date, start_time, end_time, location, type: evType, project_id, description } = req.body ?? {};
       if (!title || !date) return res.status(400).json({ error: "Título e data são obrigatórios" });
       const responsibleName = niceName(user);
       const [event] = await sql`
-        INSERT INTO agenda_events (title, date, start_time, end_time, location, responsible_name, status, type, project_id)
-        VALUES (${title}, ${date}, ${start_time || null}, ${end_time || null}, ${location ?? null}, ${responsibleName}, 'Pendente', ${evType || "Reunião"}, ${project_id ?? null})
-        RETURNING id, title, date, start_time, end_time, location, project_id, responsible_name, status, type, created_at
+        INSERT INTO agenda_events (title, date, start_time, end_time, location, description, responsible_name, status, type, project_id)
+        VALUES (${title}, ${date}, ${start_time || null}, ${end_time || null}, ${location ?? null}, ${description ?? null}, ${responsibleName}, 'Pendente', ${evType || "Reunião"}, ${project_id ?? null})
+        RETURNING id, title, date, start_time, end_time, location, description, project_id, responsible_name, status, type, created_at
       `;
       return res.status(201).json(event);
     }
@@ -338,6 +339,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         FROM content_posts p WHERE p.id = ${post.id}
       `;
       return res.status(201).json(full);
+    }
+
+    case "article-files": {
+      if (req.method === "GET") {
+        const articleId = Number(req.query.articleId);
+        if (!articleId) return res.status(400).json({ error: "articleId é obrigatório" });
+        const rows = await sql`
+          SELECT id, article_id, name, url, path, size_bytes, content_type, uploaded_by, created_at
+          FROM knowledge_article_files WHERE article_id = ${articleId} ORDER BY created_at DESC
+        `;
+        return res.status(200).json(rows);
+      }
+      if (req.method === "POST") {
+        const { article_id, name, url, path, size_bytes, content_type } = req.body ?? {};
+        if (!article_id || !name || !url || !path) return res.status(400).json({ error: "Dados do arquivo incompletos" });
+        const [file] = await sql`
+          INSERT INTO knowledge_article_files (article_id, name, url, path, size_bytes, content_type, uploaded_by)
+          VALUES (${article_id}, ${name}, ${url}, ${path}, ${size_bytes ?? null}, ${content_type ?? null}, ${niceName(user)})
+          RETURNING id, article_id, name, url, path, size_bytes, content_type, uploaded_by, created_at
+        `;
+        return res.status(201).json(file);
+      }
+      if (req.method === "DELETE") {
+        const fileId = Number(req.query.id);
+        if (!fileId) return res.status(400).json({ error: "id é obrigatório" });
+        await sql`DELETE FROM knowledge_article_files WHERE id = ${fileId}`;
+        return res.status(204).end();
+      }
+      res.setHeader("Allow", "GET, POST, DELETE");
+      return res.status(405).json({ error: "Método não permitido" });
     }
 
     default:

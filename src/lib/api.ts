@@ -146,6 +146,7 @@ export interface AgendaEvent {
   start_time: string | null;
   end_time: string | null;
   location: string | null;
+  description: string | null;
   project_id: number | null;
   responsible_name: string | null;
   status: string;
@@ -509,6 +510,40 @@ export const articlesApi = {
   },
   async remove(id: number) {
     const res = await fetch(`/api/resources/articles?id=${id}`, {
+      method: "DELETE",
+      headers: await authHeaders(),
+    });
+    await handleResponse(res);
+  },
+};
+
+export interface ArticleFile {
+  id: number;
+  article_id: number;
+  name: string;
+  url: string;
+  path: string;
+  size_bytes: number | null;
+  content_type: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+}
+
+export const articleFilesApi = {
+  async list(articleId: number): Promise<ArticleFile[]> {
+    const res = await fetch(`/api/resources/article-files?articleId=${articleId}`, { headers: await authHeaders() });
+    return handleResponse(res);
+  },
+  async create(data: { article_id: number; name: string; url: string; path: string; size_bytes?: number; content_type?: string }) {
+    const res = await fetch("/api/resources/article-files", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+  async remove(id: number) {
+    const res = await fetch(`/api/resources/article-files?id=${id}`, {
       method: "DELETE",
       headers: await authHeaders(),
     });

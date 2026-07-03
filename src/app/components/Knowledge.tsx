@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { Search, Plus, Star, Clock, ChevronRight, FileText, Folder, Tag, X, BookOpen, Loader2, Pencil, Trash2 } from "lucide-react";
-import { articlesApi, type Article as ApiArticle } from "../../lib/api";
+import { Search, Plus, Star, Clock, ChevronRight, FileText, Folder, Tag, X, BookOpen, Loader2, Pencil, Trash2, Paperclip, Download } from "lucide-react";
+import { articlesApi, articleFilesApi, type Article as ApiArticle, type ArticleFile } from "../../lib/api";
+import { supabase, PROJECT_FILES_BUCKET } from "../../lib/supabase";
 
 const categories = [
   { id: "processes", label: "Processos Internos", icon: "⚙️" },
@@ -54,6 +55,9 @@ export function Knowledge() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [togglingStar, setTogglingStar] = useState(false);
+  const [files, setFiles] = useState<ArticleFile[]>([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
 
   const loadArticles = useCallback(async () => {
     setLoading(true);
@@ -73,6 +77,62 @@ export function Knowledge() {
   useEffect(() => {
     loadArticles();
   }, [loadArticles]);
+
+  const loadFiles = useCallback(async (articleId: number) => {
+    setFilesLoading(true);
+    try {
+      setFiles(await articleFilesApi.list(articleId));
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível carregar os arquivos.");
+    } finally {
+      setFilesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selectedArticle) loadFiles(selectedArticle.id);
+    else setFiles([]);
+  }, [selectedArticle?.id, loadFiles]);
+
+  async function handleUploadFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !selectedArticle) return;
+    setUploading(true);
+    setError(null);
+    try {
+      const path = `knowledge/${selectedArticle.id}/${Date.now()}-${file.name}`;
+      const { error: upErr } = await supabase.storage.from(PROJECT_FILES_BUCKET).upload(path, file);
+      if (upErr) throw upErr;
+      const { data } = supabase.storage.from(PROJECT_FILES_BUCKET).getPublicUrl(path);
+      await articleFilesApi.create({
+        article_id: selectedArticle.id, name: file.name, url: data.publicUrl, path,
+        size_bytes: file.size, content_type: file.type,
+      });
+      await loadFiles(selectedArticle.id);
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível enviar o arquivo.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleDeleteFile(f: ArticleFile) {
+    try {
+      await supabase.storage.from(PROJECT_FILES_BUCKET).remove([f.path]);
+      await articleFilesApi.remove(f.id);
+      if (selectedArticle) await loadFiles(selectedArticle.id);
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível excluir o arquivo.");
+    }
+  }
+
+  function fmtBytes(n: number | null) {
+    if (!n) return "";
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
   async function handleSaveArticle() {
     if (!form.title.trim()) return;
@@ -283,6 +343,32 @@ export function Knowledge() {
                 if (line === "") return <div key={i} className="h-2" />;
                 return <p key={i} className="text-sm mb-2" style={{ color: "var(--foreground)" }}>{line}</p>;
               })}
+            </div>
+
+            <div className="mt-8 pt-6 border-t" style={{ borderColor: "var(--border)" }}>
+              <div className="text-sm font-semibold mb-3" style={{ color: "var(--foreground)" }}>Arquivos anexados</div>
+              <label className="flex items-center justify-center gap-2 px-4 py-3 rounded-xl border-2 border-dashed cursor-pointer transition-colors hover:bg-muted mb-3" style={{ borderColor: "var(--border)", color: "var(--muted-foreground)" }}>
+                {uploading ? <Loader2 size={15} className="animate-spin" /> : <Paperclip size={15} />}
+                <span className="text-sm font-medium">{uploading ? "Enviando..." : "Clique pra anexar um arquivo"}</span>
+                <input type="file" className="hidden" onChange={handleUploadFile} disabled={uploading} />
+              </label>
+              {filesLoading && <div className="text-xs flex items-center gap-2" style={{ color: "var(--muted-foreground)" }}><Loader2 size={12} className="animate-spin" />Carregando...</div>}
+              <div className="space-y-2">
+                {files.map((f) => (
+                  <div key={f.id} className="flex items-center gap-3 p-3 rounded-xl border" style={{ borderColor: "var(--border)" }}>
+                    <Paperclip size={14} style={{ color: "var(--muted-foreground)" }} className="flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate" style={{ color: "var(--foreground)" }}>{f.name}</div>
+                      <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>{fmtBytes(f.size_bytes)} · {f.uploaded_by} · {new Date(f.created_at).toLocaleDateString("pt-BR")}</div>
+                    </div>
+                    <a href={f.url} target="_blank" rel="noreferrer" className="flex-shrink-0" style={{ color: "var(--primary)" }}><Download size={14} /></a>
+                    <button onClick={() => handleDeleteFile(f)} className="flex-shrink-0" style={{ color: "#EF4444" }}><Trash2 size={13} /></button>
+                  </div>
+                ))}
+                {!filesLoading && files.length === 0 && (
+                  <div className="text-xs text-center py-4" style={{ color: "var(--muted-foreground)" }}>Nenhum arquivo anexado ainda.</div>
+                )}
+              </div>
             </div>
           </div>
         ) : (

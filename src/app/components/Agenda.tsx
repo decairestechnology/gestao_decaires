@@ -17,6 +17,7 @@ interface UiEvent {
   time: string;
   end: string;
   location: string;
+  description: string;
   participants: string[];
   project: string;
   projectId: number | null;
@@ -29,10 +30,11 @@ function toUiEvent(e: ApiEvent): UiEvent {
   return {
     id: e.id,
     title: e.title,
-    date: e.date,
+    date: e.date ? e.date.slice(0, 10) : "", // normaliza, a API pode devolver com ou sem horário junto
     time: e.start_time ? e.start_time.slice(0, 5) : "—",
     end: e.end_time ? e.end_time.slice(0, 5) : "—",
     location: e.location ?? "—",
+    description: e.description ?? "",
     participants: e.responsible_name ? [e.responsible_name] : [],
     project: "—",
     projectId: e.project_id,
@@ -93,13 +95,93 @@ function CalendarGrid({ year, month, events, onSelect }: { year: number; month: 
   );
 }
 
-const emptyForm = { title: "", date: "", start_time: "", location: "", type: "Reunião", project_id: "" };
+function startOfWeek(d: Date) {
+  const s = new Date(d);
+  s.setDate(s.getDate() - s.getDay());
+  s.setHours(0, 0, 0, 0);
+  return s;
+}
+
+function fmtLocalDate(d: Date) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function WeekView({ referenceDate, events, onSelect }: { referenceDate: Date; events: UiEvent[]; onSelect: (e: UiEvent) => void }) {
+  const start = startOfWeek(referenceDate);
+  const weekDays = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    return d;
+  });
+  const today = new Date();
+
+  return (
+    <div className="grid grid-cols-7 gap-2">
+      {weekDays.map((d, i) => {
+        const dateStr = fmtLocalDate(d);
+        const isToday = fmtLocalDate(today) === dateStr;
+        const dayEvents = events.filter((e) => e.date === dateStr).sort((a, b) => a.time.localeCompare(b.time));
+        return (
+          <div key={i} className="rounded-xl border p-2 flex flex-col" style={{ minHeight: 320, borderColor: isToday ? "var(--primary)" : "var(--border)", background: isToday ? "var(--accent)" : "var(--card)", borderWidth: isToday ? 1.5 : 1 }}>
+            <div className="text-center mb-2">
+              <div className="text-xs font-semibold" style={{ color: "var(--muted-foreground)" }}>{days[d.getDay()]}</div>
+              <div className="text-sm font-bold" style={{ color: isToday ? "var(--primary)" : "var(--foreground)" }}>{d.getDate()}</div>
+            </div>
+            <div className="flex-1 space-y-1 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
+              {dayEvents.map((e) => (
+                <div key={e.id} onClick={() => onSelect(e)}
+                  className="text-xs px-1.5 py-1 rounded cursor-pointer font-medium truncate"
+                  style={{ background: `${typeColors[e.type]}20`, color: typeColors[e.type] }}>
+                  {e.time !== "—" && `${e.time} `}{e.title}
+                </div>
+              ))}
+              {dayEvents.length === 0 && <div className="text-xs text-center pt-4" style={{ color: "var(--muted-foreground)" }}>—</div>}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DayView({ referenceDate, events, onSelect }: { referenceDate: Date; events: UiEvent[]; onSelect: (e: UiEvent) => void }) {
+  const dateStr = fmtLocalDate(referenceDate);
+  const dayEvents = events.filter((e) => e.date === dateStr).sort((a, b) => a.time.localeCompare(b.time));
+
+  return (
+    <div className="space-y-2">
+      <div className="text-sm font-bold mb-3" style={{ color: "var(--foreground)" }}>
+        {days[referenceDate.getDay()]}, {referenceDate.getDate()} de {months[referenceDate.getMonth()]}
+      </div>
+      {dayEvents.length === 0 && (
+        <div className="text-center py-16 text-sm" style={{ color: "var(--muted-foreground)" }}>Nenhum evento nesse dia.</div>
+      )}
+      {dayEvents.map((e) => (
+        <div key={e.id} onClick={() => onSelect(e)}
+          className="rounded-xl border p-4 shadow-sm cursor-pointer hover:shadow-md transition-all flex items-center gap-4"
+          style={{ background: "var(--card)", borderColor: "var(--border)" }}>
+          <div className="w-1 self-stretch rounded-full flex-shrink-0" style={{ background: typeColors[e.type] }} />
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold text-sm" style={{ color: "var(--foreground)" }}>{e.title}</div>
+            <div className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
+              {e.time}{e.end !== "—" ? `–${e.end}` : ""} · {e.location}
+            </div>
+          </div>
+          <span className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0" style={{ background: `${typeColors[e.type]}20`, color: typeColors[e.type] }}>{e.type}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const emptyForm = { title: "", date: "", start_time: "", location: "", description: "", type: "Reunião", project_id: "" };
 
 export function Agenda() {
   const today = new Date();
   const [view, setView] = useState<ViewMode>("mensal");
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
+  const [referenceDate, setReferenceDate] = useState(today);
   const [selected, setSelected] = useState<UiEvent | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [events, setEvents] = useState<UiEvent[]>([]);
@@ -171,6 +253,7 @@ export function Agenda() {
       date: e.date,
       start_time: e.time === "—" ? "" : e.time,
       location: e.location === "—" ? "" : e.location,
+      description: e.description,
       type: e.type,
       project_id: e.projectId ? String(e.projectId) : "",
     });
@@ -211,8 +294,22 @@ export function Agenda() {
     setConfirmDelete(false);
   }
 
-  const prevMonth = () => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); };
-  const nextMonth = () => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); };
+  const prevMonth = () => {
+    if (view === "semanal") { const d = new Date(referenceDate); d.setDate(d.getDate() - 7); setReferenceDate(d); return; }
+    if (view === "diário") { const d = new Date(referenceDate); d.setDate(d.getDate() - 1); setReferenceDate(d); return; }
+    if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1);
+  };
+  const nextMonth = () => {
+    if (view === "semanal") { const d = new Date(referenceDate); d.setDate(d.getDate() + 7); setReferenceDate(d); return; }
+    if (view === "diário") { const d = new Date(referenceDate); d.setDate(d.getDate() + 1); setReferenceDate(d); return; }
+    if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1);
+  };
+
+  const headerLabel = view === "diário"
+    ? `${referenceDate.getDate()} de ${months[referenceDate.getMonth()]} ${referenceDate.getFullYear()}`
+    : view === "semanal"
+    ? `Semana de ${startOfWeek(referenceDate).getDate()} de ${months[startOfWeek(referenceDate).getMonth()]}`
+    : `${months[month]} ${year}`;
 
   return (
     <div className="p-6 overflow-y-auto h-full" style={{ scrollbarWidth: "none" }}>
@@ -225,7 +322,7 @@ export function Agenda() {
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <div className="flex items-center gap-2">
           <button onClick={prevMonth} className="w-8 h-8 rounded-lg border flex items-center justify-center transition-colors hover:bg-muted" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}><ChevronLeft size={14} /></button>
-          <span className="text-sm font-bold min-w-[140px] text-center" style={{ color: "var(--foreground)" }}>{months[month]} {year}</span>
+          <span className="text-sm font-bold min-w-[140px] text-center" style={{ color: "var(--foreground)" }}>{headerLabel}</span>
           <button onClick={nextMonth} className="w-8 h-8 rounded-lg border flex items-center justify-center transition-colors hover:bg-muted" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}><ChevronRight size={14} /></button>
         </div>
         <div className="flex items-center gap-1 rounded-lg border p-1" style={{ borderColor: "var(--border)", background: "var(--card)" }}>
@@ -267,14 +364,12 @@ export function Agenda() {
         </div>
       )}
 
-      {(view === "semanal" || view === "diário") && (
-        <div className="rounded-xl border p-8 flex items-center justify-center" style={{ background: "var(--card)", borderColor: "var(--border)", minHeight: 400 }}>
-          <div className="text-center">
-            <div className="text-4xl mb-3">📅</div>
-            <div className="text-sm font-medium" style={{ color: "var(--foreground)" }}>Visualização {view} disponível em breve</div>
-            <div className="text-xs mt-1" style={{ color: "var(--muted-foreground)" }}>Use a visualização em lista ou mensal por enquanto</div>
-          </div>
-        </div>
+      {view === "semanal" && (
+        <WeekView referenceDate={referenceDate} events={events} onSelect={openEvent} />
+      )}
+
+      {view === "diário" && (
+        <DayView referenceDate={referenceDate} events={events} onSelect={openEvent} />
       )}
 
       {/* Event Detail */}
@@ -324,6 +419,12 @@ export function Agenda() {
                   <div className="text-sm font-semibold" style={{ color: "var(--foreground)" }}>{v as string}</div>
                 </div>
               ))}
+              {selected.description && (
+                <div className="col-span-2 rounded-lg p-3" style={{ background: "var(--muted)" }}>
+                  <div className="text-xs mb-0.5" style={{ color: "var(--muted-foreground)" }}>Descrição</div>
+                  <div className="text-sm" style={{ color: "var(--foreground)" }}>{selected.description}</div>
+                </div>
+              )}
               <div className="col-span-2 rounded-lg p-3" style={{ background: "var(--muted)" }}>
                 <div className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>Participantes</div>
                 <div className="flex gap-2 flex-wrap">
@@ -371,6 +472,17 @@ export function Agenda() {
                   />
                 </div>
               ))}
+              <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Descrição</label>
+                <textarea
+                  rows={3}
+                  placeholder="Detalhes do evento..."
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none resize-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                />
+              </div>
               <div>
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Tipo de evento</label>
                 <select
