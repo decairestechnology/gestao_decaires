@@ -229,15 +229,15 @@ export interface ContentPost {
   hashtags: string[];
 }
 
-// --- Genérico: listar e criar num endpoint qualquer ---
-function makeResource<T = any>(path: string) {
+// --- Genérico: listar e criar num recurso do endpoint consolidado /api/resources/[type] ---
+function makeResource<T = any>(type: string) {
   return {
     async list(): Promise<T[]> {
-      const res = await fetch(`/api/${path}`, { headers: await authHeaders() });
+      const res = await fetch(`/api/resources/${type}`, { headers: await authHeaders() });
       return handleResponse(res);
     },
     async create(data: any): Promise<T> {
-      const res = await fetch(`/api/${path}`, {
+      const res = await fetch(`/api/resources/${type}`, {
         method: "POST",
         headers: await authHeaders(),
         body: JSON.stringify(data),
@@ -248,7 +248,18 @@ function makeResource<T = any>(path: string) {
 }
 
 export const projectsApi = {
-  ...makeResource("projects"),
+  async list(): Promise<Project[]> {
+    const res = await fetch("/api/projects", { headers: await authHeaders() });
+    return handleResponse(res);
+  },
+  async create(data: any): Promise<Project> {
+    const res = await fetch("/api/projects", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
   async updateProgress(id: number, patch: { status?: string; progress?: number }) {
     const res = await fetch(`/api/projects/${id}`, {
       method: "PATCH",
