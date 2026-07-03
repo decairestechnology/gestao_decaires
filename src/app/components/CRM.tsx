@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Plus, Phone, Mail, X, ArrowRight } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Plus, Phone, Mail, X, ArrowRight, Loader2 } from "lucide-react";
+import { leadsApi, type Lead as ApiLead } from "../../lib/api";
 
 const stages = [
   { id: "new", label: "Novo lead", color: "#64748B" },
@@ -11,26 +12,108 @@ const stages = [
   { id: "lost", label: "Lead perdido", color: "#EF4444" },
 ];
 
-const leads = [
-  { id: 1, name: "João Silva", company: "Innovate Digital", phone: "(11) 99999-1111", email: "joao@innovate.com.br", origin: "LinkedIn", interest: "Desenvolvimento web", value: 45000, responsible: "Daniel", lastContact: "08/06/2026", nextAction: "Enviar proposta técnica", stage: "proposal" },
-  { id: 2, name: "Maria Fernandes", company: "Retail Group SA", phone: "(21) 98888-2222", email: "maria@retail.com.br", origin: "Indicação", interest: "App mobile", value: 80000, responsible: "Julia", lastContact: "07/06/2026", nextAction: "Reunião de alinhamento", stage: "negotiation" },
-  { id: 3, name: "Carlos Braga", company: "Gov Municipal", phone: "(31) 97777-3333", email: "carlos@gov.br", origin: "Site", interest: "Portal institucional", value: 120000, responsible: "Marcos", lastContact: "05/06/2026", nextAction: "Qualificar necessidades", stage: "qualify" },
-  { id: 4, name: "Ana Ribeiro", company: "Fintech Alpha", phone: "(11) 96666-4444", email: "ana@fintech.com.br", origin: "Google Ads", interest: "BI e dashboards", value: 35000, responsible: "Rafael", lastContact: "04/06/2026", nextAction: "Ligar para agendar demo", stage: "contact" },
-  { id: 5, name: "Pedro Moura", company: "E-commerce Plus", phone: "(41) 95555-5555", email: "pedro@ecommerceplus.com", origin: "Instagram", interest: "E-commerce", value: 28000, responsible: "Fernanda", lastContact: "03/06/2026", nextAction: "Primeiro contato por email", stage: "new" },
-  { id: 6, name: "Larissa Campos", company: "Tech Startup XYZ", phone: "(11) 94444-6666", email: "larissa@xyz.com.br", origin: "LinkedIn", interest: "CRM customizado", value: 55000, responsible: "Daniel", lastContact: "09/06/2026", nextAction: "Fechar contrato", stage: "won" },
-  { id: 7, name: "Ricardo Santos", company: "OldCo Ltda", phone: "(21) 93333-7777", email: "ricardo@oldco.com.br", origin: "Site", interest: "Sistema legado", value: 15000, responsible: "Carlos", lastContact: "01/06/2026", nextAction: "Arquivar", stage: "lost" },
-];
+// Formato usado nas telas — convertido a partir do que a API devolve
+interface UiLead {
+  id: number;
+  name: string;
+  company: string;
+  phone: string;
+  email: string;
+  origin: string;
+  interest: string;
+  value: number;
+  responsible: string;
+  lastContact: string;
+  nextAction: string;
+  stage: string;
+}
+
+function toUiLead(l: ApiLead): UiLead {
+  return {
+    id: l.id,
+    name: l.name,
+    company: l.company ?? "",
+    phone: l.phone ?? "",
+    email: l.email ?? "",
+    origin: l.origin ?? "",
+    interest: l.interest ?? "",
+    value: Number(l.value) || 0,
+    responsible: l.responsible_name ?? "",
+    lastContact: l.last_contact ? new Date(l.last_contact).toLocaleDateString("pt-BR") : "—",
+    nextAction: l.next_action ?? "",
+    stage: l.stage,
+  };
+}
+
+const emptyForm = { name: "", company: "", phone: "", email: "", origin: "", interest: "", value: "" };
 
 export function CRM() {
-  const [selected, setSelected] = useState<typeof leads[0] | null>(null);
+  const [leads, setLeads] = useState<UiLead[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<UiLead | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+  const [advancing, setAdvancing] = useState(false);
+
+  const loadLeads = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await leadsApi.list();
+      setLeads(data.map(toUiLead));
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível carregar os leads.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadLeads();
+  }, [loadLeads]);
+
+  async function handleCreateLead() {
+    if (!form.name.trim()) return;
+    setSaving(true);
+    try {
+      await leadsApi.create({ ...form, value: form.value ? (Number(form.value) as any) : (0 as any) });
+      setForm(emptyForm);
+      setShowModal(false);
+      await loadLeads();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível cadastrar o lead.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleAdvanceStage() {
+    if (!selected) return;
+    setAdvancing(true);
+    try {
+      const updated = await leadsApi.advanceStage(selected.id);
+      setSelected(toUiLead(updated));
+      await loadLeads();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível avançar a etapa.");
+    } finally {
+      setAdvancing(false);
+    }
+  }
 
   return (
     <div className="p-6 overflow-y-auto h-full" style={{ scrollbarWidth: "none" }}>
+      {error && (
+        <div className="mb-4 text-sm rounded-lg px-4 py-2.5" style={{ background: "#FEF2F2", color: "#991B1B" }}>
+          {error}
+        </div>
+      )}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
           <div className="text-sm font-medium px-3 py-1 rounded-lg border" style={{ borderColor: "var(--border)", color: "var(--muted-foreground)", background: "var(--card)" }}>
-            {leads.length} leads · R$ {leads.reduce((a, l) => a + l.value, 0).toLocaleString("pt-BR")} potencial
+            {loading ? "Carregando..." : `${leads.length} leads · R$ ${leads.reduce((a, l) => a + l.value, 0).toLocaleString("pt-BR")} potencial`}
           </div>
         </div>
         <button onClick={() => setShowModal(true)}
@@ -155,7 +238,13 @@ export function CRM() {
               <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>
                 <Mail size={13} />Email
               </button>
-              <button className="ml-auto px-4 py-2 rounded-lg text-sm font-semibold" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>
+              <button
+                onClick={handleAdvanceStage}
+                disabled={advancing || selected.stage === "won" || selected.stage === "lost"}
+                className="ml-auto px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center gap-2"
+                style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+              >
+                {advancing && <Loader2 size={13} className="animate-spin" />}
                 Avançar etapa
               </button>
             </div>
@@ -171,20 +260,49 @@ export function CRM() {
               <button onClick={() => setShowModal(false)} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
             </div>
             <div className="p-6 grid grid-cols-2 gap-4">
-              {[["Nome", "text", "Nome completo"], ["Empresa", "text", "Empresa"], ["Telefone", "tel", "(11) 9..."], ["Email", "email", "email@..."], ["Origem", "text", "LinkedIn, Site..."], ["Interesse", "text", "Tipo de serviço"]].map(([l, t, ph]) => (
+              {[
+                ["Nome", "text", "Nome completo", "name"],
+                ["Empresa", "text", "Empresa", "company"],
+                ["Telefone", "tel", "(11) 9...", "phone"],
+                ["Email", "email", "email@...", "email"],
+                ["Origem", "text", "LinkedIn, Site...", "origin"],
+                ["Interesse", "text", "Tipo de serviço", "interest"],
+              ].map(([l, t, ph, key]) => (
                 <div key={l as string}>
                   <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>{l as string}</label>
-                  <input type={t as string} placeholder={ph as string} className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }} />
+                  <input
+                    type={t as string}
+                    placeholder={ph as string}
+                    value={(form as any)[key as string]}
+                    onChange={(e) => setForm({ ...form, [key as string]: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  />
                 </div>
               ))}
               <div className="col-span-2">
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Valor estimado (R$)</label>
-                <input type="number" placeholder="0,00" className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }} />
+                <input
+                  type="number"
+                  placeholder="0,00"
+                  value={form.value}
+                  onChange={(e) => setForm({ ...form, value: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                />
               </div>
             </div>
             <div className="flex gap-3 px-6 pb-6">
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 rounded-lg text-sm font-semibold" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>Cadastrar</button>
+              <button onClick={() => { setShowModal(false); setForm(emptyForm); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
+              <button
+                onClick={handleCreateLead}
+                disabled={saving || !form.name.trim()}
+                className="flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+                style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+              >
+                {saving && <Loader2 size={13} className="animate-spin" />}
+                Cadastrar
+              </button>
             </div>
           </div>
         </div>
