@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Plus, X, Instagram, Youtube, Mail, FileText } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Plus, X, Instagram, Youtube, Mail, FileText, Loader2 } from "lucide-react";
+import { contentApi, type ContentPost as ApiContentPost } from "../../lib/api";
 
 const statusColors: Record<string, { bg: string; text: string }> = {
   Ideia: { bg: "#F1F5F9", text: "#475569" },
@@ -15,28 +16,85 @@ const platformColors: Record<string, string> = {
   "E-mail": "#06B6D4", TikTok: "#000000", Blog: "#7C3AED",
 };
 
-const contents = [
-  { id: 1, title: "Como a IA está transformando o desenvolvimento de software", caption: "Descubra as principais tendências de IA no mundo tech 🚀", platform: "LinkedIn", type: "Artigo", date: "12/06/2026", responsible: "Daniel", status: "Aprovado", hashtags: ["#IA", "#Tech", "#Desenvolvimento"], cta: "Comente sua opinião" },
-  { id: 2, title: "5 ferramentas que todo dev deve conhecer em 2026", caption: "Ferramentas incríveis que vão turbinar sua produtividade!", platform: "Instagram", type: "Carrossel", date: "13/06/2026", responsible: "Julia", status: "Em produção", hashtags: ["#Dev", "#Ferramentas", "#Produtividade"], cta: "Salve para não perder" },
-  { id: 3, title: "Case de sucesso: Como automatizamos o RH de uma empresa com 500 funcionários", caption: "Veja como desenvolvemos um sistema que reduziu 60% do trabalho manual.", platform: "YouTube", type: "Vídeo", date: "15/06/2026", responsible: "Marcos", status: "Agendado", hashtags: ["#CaseDeSuccesso", "#RH", "#Tecnologia"], cta: "Se inscreva no canal" },
-  { id: 4, title: "Newsletter: DeCaires Monthly Tech", caption: "As principais novidades do mundo tech resumidas para você.", platform: "E-mail", type: "E-mail", date: "10/06/2026", responsible: "Fernanda", status: "Publicado", hashtags: [], cta: "Clique para ler" },
-  { id: 5, title: "Tendências para startups em 2026", caption: "O que os investidores estão buscando hoje?", platform: "Instagram", type: "Reels", date: "18/06/2026", responsible: "Rafael", status: "Ideia", hashtags: ["#Startups", "#Investimento", "#2026"], cta: "Compartilhe com alguém" },
-  { id: 6, title: "Tutorial: Deploy em Kubernetes do zero", caption: "Aprenda a fazer deploy de aplicações em Kubernetes com este tutorial completo.", platform: "YouTube", type: "Vídeo", date: "20/06/2026", responsible: "Carlos", status: "Em revisão", hashtags: ["#Kubernetes", "#DevOps", "#Tutorial"], cta: "Acesse o repositório no GitHub" },
-];
+interface UiContent {
+  id: number;
+  title: string;
+  caption: string;
+  platform: string;
+  type: string;
+  date: string;
+  responsible: string;
+  status: string;
+  hashtags: string[];
+  cta: string;
+}
+
+function toUiContent(c: ApiContentPost): UiContent {
+  return {
+    id: c.id,
+    title: c.title,
+    caption: c.caption ?? "",
+    platform: c.platform ?? "—",
+    type: c.type ?? "—",
+    date: c.scheduled_date ? new Date(c.scheduled_date).toLocaleDateString("pt-BR") : "—",
+    responsible: c.responsible_name ?? "—",
+    status: c.status,
+    hashtags: c.hashtags ?? [],
+    cta: c.cta ?? "—",
+  };
+}
 
 const contentTypes = ["Post", "Carrossel", "Reels", "Stories", "Artigo", "E-mail", "Vídeo", "Anúncio"];
 
 function PlatformIcon({ platform }: { platform: string }) {
-  const color = platformColors[platform] ?? "#64748B";
   const icons: Record<string, string> = { Instagram: "📸", YouTube: "▶️", LinkedIn: "💼", "E-mail": "📧", TikTok: "🎵", Blog: "📝" };
   return <span>{icons[platform] ?? "🌐"}</span>;
 }
+
+const emptyForm = { title: "", caption: "", platform: "Instagram", type: "Post", scheduled_date: "" };
 
 export function Content() {
   const [showModal, setShowModal] = useState(false);
   const [platformFilter, setPlatformFilter] = useState("Todas");
   const [statusFilter, setStatusFilter] = useState("Todos");
-  const [selected, setSelected] = useState<typeof contents[0] | null>(null);
+  const [selected, setSelected] = useState<UiContent | null>(null);
+  const [contents, setContents] = useState<UiContent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+
+  const loadContents = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await contentApi.list();
+      setContents(data.map(toUiContent));
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível carregar o conteúdo.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadContents();
+  }, [loadContents]);
+
+  async function handleCreateContent() {
+    if (!form.title.trim()) return;
+    setSaving(true);
+    try {
+      await contentApi.create(form);
+      setForm(emptyForm);
+      setShowModal(false);
+      await loadContents();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível criar o conteúdo.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const filtered = contents.filter((c) => {
     const matchPlat = platformFilter === "Todas" || c.platform === platformFilter;
@@ -46,6 +104,11 @@ export function Content() {
 
   return (
     <div className="p-6 overflow-y-auto h-full" style={{ scrollbarWidth: "none" }}>
+      {error && (
+        <div className="mb-4 text-sm rounded-lg px-4 py-2.5" style={{ background: "#FEF2F2", color: "#991B1B" }}>
+          {error}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <select value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)}
           className="text-sm px-3 py-2 rounded-lg border outline-none"
@@ -163,38 +226,72 @@ export function Content() {
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Título</label>
-                <input type="text" placeholder="Título do conteúdo" className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }} />
+                <input
+                  type="text"
+                  placeholder="Título do conteúdo"
+                  value={form.title}
+                  onChange={(e) => setForm({ ...form, title: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                />
               </div>
               <div>
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Legenda</label>
-                <textarea rows={3} placeholder="Escreva a legenda..." className="w-full px-3 py-2 rounded-lg text-sm border outline-none resize-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }} />
+                <textarea
+                  rows={3}
+                  placeholder="Escreva a legenda..."
+                  value={form.caption}
+                  onChange={(e) => setForm({ ...form, caption: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none resize-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Plataforma</label>
-                  <select className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}>
+                  <select
+                    value={form.platform}
+                    onChange={(e) => setForm({ ...form, platform: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  >
                     {Object.keys(platformColors).map(p => <option key={p}>{p}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Tipo</label>
-                  <select className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}>
+                  <select
+                    value={form.type}
+                    onChange={(e) => setForm({ ...form, type: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  >
                     {contentTypes.map(t => <option key={t}>{t}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Data de publicação</label>
-                  <input type="date" className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }} />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Responsável</label>
-                  <input type="text" placeholder="Nome" className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }} />
+                  <input
+                    type="date"
+                    value={form.scheduled_date}
+                    onChange={(e) => setForm({ ...form, scheduled_date: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  />
                 </div>
               </div>
             </div>
             <div className="flex gap-3 px-6 pb-6">
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 rounded-lg text-sm font-semibold" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>Criar</button>
+              <button onClick={() => { setShowModal(false); setForm(emptyForm); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
+              <button
+                onClick={handleCreateContent}
+                disabled={saving || !form.title.trim()}
+                className="flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+                style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+              >
+                {saving && <Loader2 size={13} className="animate-spin" />}
+                Criar
+              </button>
             </div>
           </div>
         </div>

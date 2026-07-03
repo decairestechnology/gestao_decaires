@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { ChevronLeft, ChevronRight, Plus, X, Loader2 } from "lucide-react";
+import { eventsApi, type AgendaEvent as ApiEvent } from "../../lib/api";
 
 type ViewMode = "mensal" | "semanal" | "diário" | "lista";
 
@@ -9,21 +10,40 @@ const typeColors: Record<string, string> = {
   Apresentação: "#7C3AED", Evento: "#10B981", "Contato com cliente": "#06B6D4",
 };
 
-const events = [
-  { id: 1, title: "Reunião de alinhamento – Alpha", date: "2026-06-10", time: "09:00", end: "10:00", location: "Google Meet", participants: ["Daniel", "Marcos", "Julia"], project: "Projeto Alpha", responsible: "Daniel", status: "Confirmado", type: "Reunião" },
-  { id: 2, title: "Entrega de proposta – Innovate", date: "2026-06-10", time: "14:00", end: "14:30", location: "Online", participants: ["Daniel"], project: "—", responsible: "Daniel", status: "Pendente", type: "Prazo" },
-  { id: 3, title: "Sprint Review – Beta", date: "2026-06-11", time: "10:00", end: "11:30", location: "Zoom", participants: ["Julia", "Rafael", "Carlos"], project: "App Mobile Nexus", responsible: "Julia", status: "Confirmado", type: "Reunião" },
-  { id: 4, title: "Apresentação cliente Nexus", date: "2026-06-12", time: "15:30", end: "16:30", location: "Escritório cliente", participants: ["Daniel", "Marcos"], project: "App Mobile Nexus", responsible: "Daniel", status: "Confirmado", type: "Apresentação" },
-  { id: 5, title: "Reunião financeira mensal", date: "2026-06-15", time: "09:00", end: "10:00", location: "Sala de reuniões", participants: ["Daniel", "Fernanda"], project: "—", responsible: "Daniel", status: "Confirmado", type: "Reunião" },
-  { id: 6, title: "Deadline – Módulo de pagamentos", date: "2026-06-16", time: "17:00", end: "17:00", location: "—", participants: ["Rafael"], project: "E-commerce Premium", responsible: "Rafael", status: "Pendente", type: "Prazo" },
-  { id: 7, title: "Lembrete – Renovar certificado SSL", date: "2026-06-18", time: "08:00", end: "08:15", location: "—", participants: ["Carlos"], project: "Portal Gov", responsible: "Carlos", status: "Pendente", type: "Lembrete" },
-  { id: 8, title: "Ligar para lead Maria Fernandes", date: "2026-06-13", time: "11:00", end: "11:30", location: "Telefone", participants: ["Julia"], project: "—", responsible: "Julia", status: "Pendente", type: "Contato com cliente" },
-];
+interface UiEvent {
+  id: number;
+  title: string;
+  date: string;
+  time: string;
+  end: string;
+  location: string;
+  participants: string[];
+  project: string;
+  responsible: string;
+  status: string;
+  type: string;
+}
+
+function toUiEvent(e: ApiEvent): UiEvent {
+  return {
+    id: e.id,
+    title: e.title,
+    date: e.date,
+    time: e.start_time ? e.start_time.slice(0, 5) : "—",
+    end: e.end_time ? e.end_time.slice(0, 5) : "—",
+    location: e.location ?? "—",
+    participants: e.responsible_name ? [e.responsible_name] : [],
+    project: "—",
+    responsible: e.responsible_name ?? "—",
+    status: e.status,
+    type: e.type ?? "Evento",
+  };
+}
 
 const days = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const months = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
 
-function CalendarGrid({ year, month, events, onSelect }: { year: number; month: number; events: typeof events; onSelect: (e: typeof events[0]) => void }) {
+function CalendarGrid({ year, month, events, onSelect }: { year: number; month: number; events: UiEvent[]; onSelect: (e: UiEvent) => void }) {
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const today = new Date();
@@ -71,18 +91,62 @@ function CalendarGrid({ year, month, events, onSelect }: { year: number; month: 
   );
 }
 
+const emptyForm = { title: "", date: "", start_time: "", location: "", type: "Reunião" };
+
 export function Agenda() {
   const [view, setView] = useState<ViewMode>("mensal");
   const [year, setYear] = useState(2026);
   const [month, setMonth] = useState(5); // June
-  const [selected, setSelected] = useState<typeof events[0] | null>(null);
+  const [selected, setSelected] = useState<UiEvent | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [events, setEvents] = useState<UiEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+
+  const loadEvents = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await eventsApi.list();
+      setEvents(data.map(toUiEvent));
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível carregar a agenda.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadEvents();
+  }, [loadEvents]);
+
+  async function handleCreateEvent() {
+    if (!form.title.trim() || !form.date) return;
+    setSaving(true);
+    try {
+      await eventsApi.create(form);
+      setForm(emptyForm);
+      setShowModal(false);
+      await loadEvents();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível criar o evento.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const prevMonth = () => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); };
   const nextMonth = () => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); };
 
   return (
     <div className="p-6 overflow-y-auto h-full" style={{ scrollbarWidth: "none" }}>
+      {error && (
+        <div className="mb-4 text-sm rounded-lg px-4 py-2.5" style={{ background: "#FEF2F2", color: "#991B1B" }}>
+          {error}
+        </div>
+      )}
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <div className="flex items-center gap-2">
@@ -185,22 +249,42 @@ export function Agenda() {
               <button onClick={() => setShowModal(false)} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
             </div>
             <div className="p-6 space-y-4">
-              {[["Título", "text", "Nome do evento"], ["Data", "date", ""], ["Horário", "time", ""], ["Local / Link", "text", "Sala, Google Meet..."]].map(([l, t, ph]) => (
+              {[["Título", "text", "Nome do evento", "title"], ["Data", "date", "", "date"], ["Horário", "time", "", "start_time"], ["Local / Link", "text", "Sala, Google Meet...", "location"]].map(([l, t, ph, key]) => (
                 <div key={l as string}>
                   <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>{l as string}</label>
-                  <input type={t as string} placeholder={ph as string} className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }} />
+                  <input
+                    type={t as string}
+                    placeholder={ph as string}
+                    value={(form as any)[key as string]}
+                    onChange={(e) => setForm({ ...form, [key as string]: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  />
                 </div>
               ))}
               <div>
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Tipo de evento</label>
-                <select className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}>
+                <select
+                  value={form.type}
+                  onChange={(e) => setForm({ ...form, type: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                >
                   {eventTypes.map(t => <option key={t}>{t}</option>)}
                 </select>
               </div>
             </div>
             <div className="flex gap-3 px-6 pb-6">
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 rounded-lg text-sm font-semibold" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>Criar evento</button>
+              <button onClick={() => { setShowModal(false); setForm(emptyForm); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
+              <button
+                onClick={handleCreateEvent}
+                disabled={saving || !form.title.trim() || !form.date}
+                className="flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+                style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+              >
+                {saving && <Loader2 size={13} className="animate-spin" />}
+                Criar evento
+              </button>
             </div>
           </div>
         </div>

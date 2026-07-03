@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Plus, ExternalLink, Github, Users, X, Globe } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Plus, ExternalLink, Github, Users, X, Globe, Loader2 } from "lucide-react";
+import { platformsApi, type Platform as ApiPlatform } from "../../lib/api";
 
 const statusColors: Record<string, { bg: string; text: string }> = {
   Ideia: { bg: "#F1F5F9", text: "#475569" },
@@ -11,24 +12,99 @@ const statusColors: Record<string, { bg: string; text: string }> = {
   Descontinuada: { bg: "#FEF2F2", text: "#991B1B" },
 };
 
-const platforms = [
-  { id: 1, name: "DeCaires HUB", logo: "🚀", desc: "Plataforma central de gestão empresarial com módulos integrados de projetos, CRM e finanças.", category: "SaaS B2B", tech: ["React", "Node.js", "PostgreSQL", "AWS"], status: "Desenvolvimento", responsible: "Daniel", launch: "Set 2026", users: 0, revenue: 0, costs: 4200, link: "hub.decaires.com.br", repo: "github.com/decaires/hub", prod: "hub.decaires.com.br", staging: "staging.decaires.com.br" },
-  { id: 2, name: "OnboardPro", logo: "🎯", desc: "Sistema de onboarding digital para RH com trilhas de aprendizado e assinatura de documentos.", category: "RH Tech", tech: ["Next.js", "TypeScript", "Supabase"], status: "Produção", responsible: "Julia", launch: "Mar 2026", users: 124, revenue: 8400, costs: 1200, link: "onboardpro.com.br", repo: "github.com/decaires/onboardpro", prod: "onboardpro.com.br", staging: "staging.onboardpro.com.br" },
-  { id: 3, name: "FinTrack MEI", logo: "💰", desc: "Controle financeiro simplificado para microempreendedores com emissão de nota fiscal.", category: "Fintech", tech: ["React Native", "Firebase", "Node.js"], status: "Testes", responsible: "Marcos", launch: "Ago 2026", users: 0, revenue: 0, costs: 1800, link: "—", repo: "github.com/decaires/fintrack", prod: "—", staging: "fintrack-staging.decaires.com.br" },
-  { id: 4, name: "ClickMenu", logo: "🍽️", desc: "Cardápio digital com QR Code para restaurantes com sistema de pedidos integrado.", category: "Food Tech", tech: ["Vue.js", "Laravel", "MySQL"], status: "Manutenção", responsible: "Rafael", launch: "Jan 2025", users: 342, revenue: 5100, costs: 800, link: "clickmenu.com.br", repo: "github.com/decaires/clickmenu", prod: "clickmenu.com.br", staging: "dev.clickmenu.com.br" },
-  { id: 5, name: "EduConnect", logo: "📚", desc: "LMS para pequenas instituições de ensino com videoaulas e avaliações automatizadas.", category: "EdTech", tech: ["React", "Django", "PostgreSQL"], status: "Descontinuada", responsible: "Fernanda", launch: "Jun 2024", users: 89, revenue: 0, costs: 200, link: "—", repo: "github.com/decaires/educonnect", prod: "—", staging: "—" },
-  { id: 6, name: "PropTech Dashboard", logo: "🏠", desc: "Dashboard analítico para corretoras imobiliárias com integração com portais de anúncios.", category: "PropTech", tech: ["React", "FastAPI", "Redis"], status: "Planejamento", responsible: "Carlos", launch: "Nov 2026", users: 0, revenue: 0, costs: 0, link: "—", repo: "—", prod: "—", staging: "—" },
-];
+interface UiPlatform {
+  id: number;
+  name: string;
+  logo: string;
+  desc: string;
+  category: string;
+  tech: string[];
+  status: string;
+  responsible: string;
+  launch: string;
+  users: number;
+  revenue: number;
+  costs: number;
+  link: string;
+  repo: string;
+  prod: string;
+  staging: string;
+}
+
+function toUiPlatform(p: ApiPlatform): UiPlatform {
+  return {
+    id: p.id,
+    name: p.name,
+    logo: p.logo_emoji ?? "🚀",
+    desc: p.description ?? "",
+    category: p.category ?? "—",
+    tech: p.tech ?? [],
+    status: p.status,
+    responsible: p.responsible_name ?? "—",
+    launch: p.launch_date ?? "—",
+    users: p.users_count ?? 0,
+    revenue: Number(p.revenue) || 0,
+    costs: Number(p.monthly_costs) || 0,
+    link: p.public_link ?? "—",
+    repo: p.repo_link ?? "—",
+    prod: p.prod_link ?? "—",
+    staging: p.staging_link ?? "—",
+  };
+}
+
+const emptyForm = { name: "", category: "", description: "" };
 
 export function Platforms() {
-  const [selected, setSelected] = useState<typeof platforms[0] | null>(null);
+  const [selected, setSelected] = useState<UiPlatform | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [statusFilter, setStatusFilter] = useState("Todas");
+  const [platforms, setPlatforms] = useState<UiPlatform[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+
+  const loadPlatforms = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await platformsApi.list();
+      setPlatforms(data.map(toUiPlatform));
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível carregar as plataformas.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadPlatforms();
+  }, [loadPlatforms]);
+
+  async function handleCreatePlatform() {
+    if (!form.name.trim()) return;
+    setSaving(true);
+    try {
+      await platformsApi.create(form);
+      setForm(emptyForm);
+      setShowModal(false);
+      await loadPlatforms();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível cadastrar a plataforma.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const filtered = platforms.filter(p => statusFilter === "Todas" || p.status === statusFilter);
 
   return (
     <div className="p-6 overflow-y-auto h-full" style={{ scrollbarWidth: "none" }}>
+      {error && (
+        <div className="mb-4 text-sm rounded-lg px-4 py-2.5" style={{ background: "#FEF2F2", color: "#991B1B" }}>
+          {error}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
           className="text-sm px-3 py-2 rounded-lg border outline-none"
@@ -141,26 +217,42 @@ export function Platforms() {
               <button onClick={() => setShowModal(false)} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
             </div>
             <div className="p-6 space-y-4">
-              {[["Nome", "text", "Nome da plataforma"], ["Categoria", "text", "SaaS, Fintech..."], ["Responsável", "text", "Nome do responsável"]].map(([l, t, ph]) => (
+              {[["Nome", "text", "Nome da plataforma", "name"], ["Categoria", "text", "SaaS, Fintech...", "category"]].map(([l, t, ph, key]) => (
                 <div key={l as string}>
                   <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>{l as string}</label>
-                  <input type={t as string} placeholder={ph as string} className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }} />
+                  <input
+                    type={t as string}
+                    placeholder={ph as string}
+                    value={(form as any)[key as string]}
+                    onChange={(e) => setForm({ ...form, [key as string]: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  />
                 </div>
               ))}
               <div>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Status inicial</label>
-                <select className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}>
-                  {Object.keys(statusColors).map(s => <option key={s}>{s}</option>)}
-                </select>
-              </div>
-              <div>
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Descrição</label>
-                <textarea rows={3} placeholder="Descreva a plataforma..." className="w-full px-3 py-2 rounded-lg text-sm border outline-none resize-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }} />
+                <textarea
+                  rows={3}
+                  placeholder="Descreva a plataforma..."
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none resize-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                />
               </div>
             </div>
             <div className="flex gap-3 px-6 pb-6">
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 rounded-lg text-sm font-semibold" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>Cadastrar</button>
+              <button onClick={() => { setShowModal(false); setForm(emptyForm); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
+              <button
+                onClick={handleCreatePlatform}
+                disabled={saving || !form.name.trim()}
+                className="flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+                style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+              >
+                {saving && <Loader2 size={13} className="animate-spin" />}
+                Cadastrar
+              </button>
             </div>
           </div>
         </div>

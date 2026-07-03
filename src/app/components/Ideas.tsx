@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Plus, Search, Star, X, Lightbulb } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Plus, Search, Star, X, Lightbulb, Loader2 } from "lucide-react";
+import { ideasApi, type Idea as ApiIdea } from "../../lib/api";
 
 const statusColors: Record<string, { bg: string; text: string }> = {
   Nova: { bg: "#E0F9FF", text: "#0E7490" },
@@ -10,14 +11,43 @@ const statusColors: Record<string, { bg: string; text: string }> = {
   Arquivada: { bg: "#F1F5F9", text: "#475569" },
 };
 
-const ideas = [
-  { id: 1, title: "Plataforma de Mentoria Tech", desc: "Conectar desenvolvedores júnior com seniors para mentoria 1:1 com sistema de pagamento por sessão.", category: "SaaS", author: "Daniel", date: "05/06/2026", priority: "Alta", revenue: "Alto", complexity: "Média", target: "Devs júnior", status: "Em análise", scores: { viabilidade: 4, comercial: 5, inovacao: 4, custo: 3, tempo: 3 } },
-  { id: 2, title: "App de Controle Financeiro para MEI", desc: "Ferramenta simples de controle financeiro focada em microempreendedores individuais com emissão de nota.", category: "Fintech", author: "Julia", date: "03/06/2026", priority: "Alta", revenue: "Médio", complexity: "Baixa", target: "MEI", status: "Aprovada", scores: { viabilidade: 5, comercial: 4, inovacao: 3, custo: 4, tempo: 4 } },
-  { id: 3, title: "CRM com IA para pequenas empresas", desc: "CRM com assistente de IA que sugere próximas ações baseado no comportamento do lead.", category: "CRM", author: "Marcos", date: "01/06/2026", priority: "Média", revenue: "Alto", complexity: "Alta", target: "PMEs", status: "Nova", scores: { viabilidade: 3, comercial: 5, inovacao: 5, custo: 2, tempo: 2 } },
-  { id: 4, title: "Marketplace de Serviços de TI", desc: "Plataforma para contratar serviços de TI sob demanda com garantia e avaliações verificadas.", category: "Marketplace", author: "Rafael", date: "28/05/2026", priority: "Baixa", revenue: "Alto", complexity: "Alta", target: "Empresas", status: "Validando", scores: { viabilidade: 3, comercial: 5, inovacao: 4, custo: 2, tempo: 2 } },
-  { id: 5, title: "Ferramenta de Onboarding Digital", desc: "Plataforma de onboarding de funcionários com trilhas de aprendizado e assinatura digital de documentos.", category: "RH Tech", author: "Fernanda", date: "25/05/2026", priority: "Média", revenue: "Médio", complexity: "Média", target: "RH corporativo", status: "Em desenvolvimento", scores: { viabilidade: 4, comercial: 4, inovacao: 3, custo: 3, tempo: 3 } },
-  { id: 6, title: "Plugin de Analytics para Notion", desc: "Extensão que adiciona dashboards de analytics e relatórios automáticos dentro do Notion.", category: "Produtividade", author: "Carlos", date: "20/05/2026", priority: "Baixa", revenue: "Baixo", complexity: "Baixa", target: "Usuários Notion", status: "Arquivada", scores: { viabilidade: 4, comercial: 2, inovacao: 3, custo: 5, tempo: 5 } },
-];
+interface UiIdea {
+  id: number;
+  title: string;
+  desc: string;
+  category: string;
+  author: string;
+  date: string;
+  priority: string;
+  revenue: string;
+  complexity: string;
+  target: string;
+  status: string;
+  scores: { viabilidade: number; comercial: number; inovacao: number; custo: number; tempo: number };
+}
+
+function toUiIdea(i: ApiIdea): UiIdea {
+  return {
+    id: i.id,
+    title: i.title,
+    desc: i.description ?? "",
+    category: i.category ?? "—",
+    author: i.author_name ?? "—",
+    date: i.created_at ? new Date(i.created_at).toLocaleDateString("pt-BR") : "—",
+    priority: i.priority,
+    revenue: i.revenue_potential ?? "—",
+    complexity: i.complexity ?? "—",
+    target: i.target_audience ?? "—",
+    status: i.status,
+    scores: {
+      viabilidade: i.score_viability ?? 0,
+      comercial: i.score_commercial ?? 0,
+      inovacao: i.score_innovation ?? 0,
+      custo: i.score_cost ?? 0,
+      tempo: i.score_time ?? 0,
+    },
+  };
+}
 
 const priorityColors: Record<string, string> = { Alta: "#EF4444", Média: "#F59E0B", Baixa: "#10B981" };
 
@@ -37,11 +67,50 @@ function ScoreBar({ label, value }: { label: string; value: number }) {
   );
 }
 
+const emptyForm = { title: "", category: "", target_audience: "", description: "", priority: "Média", revenue_potential: "Médio" };
+
 export function Ideas() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("Todas");
   const [showModal, setShowModal] = useState(false);
-  const [selected, setSelected] = useState<typeof ideas[0] | null>(null);
+  const [selected, setSelected] = useState<UiIdea | null>(null);
+  const [ideas, setIdeas] = useState<UiIdea[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+
+  const loadIdeas = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await ideasApi.list();
+      setIdeas(data.map(toUiIdea));
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível carregar as ideias.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadIdeas();
+  }, [loadIdeas]);
+
+  async function handleCreateIdea() {
+    if (!form.title.trim()) return;
+    setSaving(true);
+    try {
+      await ideasApi.create(form);
+      setForm(emptyForm);
+      setShowModal(false);
+      await loadIdeas();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível salvar a ideia.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const filtered = ideas.filter((i) => {
     const matchSearch = i.title.toLowerCase().includes(search.toLowerCase());
@@ -51,6 +120,11 @@ export function Ideas() {
 
   return (
     <div className="p-6 overflow-y-auto h-full" style={{ scrollbarWidth: "none" }}>
+      {error && (
+        <div className="mb-4 text-sm rounded-lg px-4 py-2.5" style={{ background: "#FEF2F2", color: "#991B1B" }}>
+          {error}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <div className="flex-1 relative">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--muted-foreground)" }} />
@@ -146,34 +220,66 @@ export function Ideas() {
               <button onClick={() => setShowModal(false)} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
             </div>
             <div className="p-6 space-y-4">
-              {[["Título", "text", "Nome da ideia"], ["Categoria", "text", "Ex: SaaS, Fintech..."], ["Público-alvo", "text", "Quem vai usar?"]].map(([l, t, ph]) => (
+              {[["Título", "text", "Nome da ideia", "title"], ["Categoria", "text", "Ex: SaaS, Fintech...", "category"], ["Público-alvo", "text", "Quem vai usar?", "target_audience"]].map(([l, t, ph, key]) => (
                 <div key={l as string}>
                   <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>{l as string}</label>
-                  <input type={t as string} placeholder={ph as string} className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }} />
+                  <input
+                    type={t as string}
+                    placeholder={ph as string}
+                    value={(form as any)[key as string]}
+                    onChange={(e) => setForm({ ...form, [key as string]: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  />
                 </div>
               ))}
               <div>
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Descrição</label>
-                <textarea rows={3} placeholder="Descreva a ideia..." className="w-full px-3 py-2 rounded-lg text-sm border outline-none resize-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }} />
+                <textarea
+                  rows={3}
+                  placeholder="Descreva a ideia..."
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none resize-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Prioridade</label>
-                  <select className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}>
+                  <select
+                    value={form.priority}
+                    onChange={(e) => setForm({ ...form, priority: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  >
                     <option>Alta</option><option>Média</option><option>Baixa</option>
                   </select>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Potencial de receita</label>
-                  <select className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}>
+                  <select
+                    value={form.revenue_potential}
+                    onChange={(e) => setForm({ ...form, revenue_potential: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  >
                     <option>Alto</option><option>Médio</option><option>Baixo</option>
                   </select>
                 </div>
               </div>
             </div>
             <div className="flex gap-3 px-6 pb-6">
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 rounded-lg text-sm font-semibold" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>Salvar ideia</button>
+              <button onClick={() => { setShowModal(false); setForm(emptyForm); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
+              <button
+                onClick={handleCreateIdea}
+                disabled={saving || !form.title.trim()}
+                className="flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+                style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+              >
+                {saving && <Loader2 size={13} className="animate-spin" />}
+                Salvar ideia
+              </button>
             </div>
           </div>
         </div>

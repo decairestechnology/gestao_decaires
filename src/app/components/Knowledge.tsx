@@ -1,30 +1,90 @@
-import { useState } from "react";
-import { Search, Plus, Star, Clock, ChevronRight, FileText, Folder, Tag, X, BookOpen } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Search, Plus, Star, Clock, ChevronRight, FileText, Folder, Tag, X, BookOpen, Loader2 } from "lucide-react";
+import { articlesApi, type Article as ApiArticle } from "../../lib/api";
 
 const categories = [
-  { id: "processes", label: "Processos Internos", icon: "⚙️", count: 8 },
-  { id: "dev", label: "Padrões de Dev", icon: "💻", count: 12 },
-  { id: "clients", label: "Clientes", icon: "👥", count: 5 },
-  { id: "templates", label: "Modelos e Templates", icon: "📄", count: 7 },
-  { id: "tutorials", label: "Tutoriais", icon: "📖", count: 15 },
-  { id: "notes", label: "Anotações", icon: "📝", count: 9 },
-  { id: "links", label: "Links Úteis", icon: "🔗", count: 23 },
+  { id: "processes", label: "Processos Internos", icon: "⚙️" },
+  { id: "dev", label: "Padrões de Dev", icon: "💻" },
+  { id: "clients", label: "Clientes", icon: "👥" },
+  { id: "templates", label: "Modelos e Templates", icon: "📄" },
+  { id: "tutorials", label: "Tutoriais", icon: "📖" },
+  { id: "notes", label: "Anotações", icon: "📝" },
+  { id: "links", label: "Links Úteis", icon: "🔗" },
 ];
 
-const articles = [
-  { id: 1, title: "Guia de Onboarding de Clientes", cat: "processes", catLabel: "Processos Internos", author: "Daniel", updated: "08/06/2026", tags: ["onboarding", "clientes", "processo"], content: "# Guia de Onboarding de Clientes\n\n## 1. Kickoff Meeting\nAgendar reunião inicial com o cliente para alinhamento de expectativas e apresentação da equipe.\n\n## 2. Acesso ao Projeto\nFornencer acesso ao repositório, ferramentas de gestão e canais de comunicação.\n\n## 3. Documentação\nColetar todos os documentos necessários: contratos, briefings e especificações técnicas.\n\n## 4. Acompanhamento\nEstabelecer cadência de reuniões semanais e relatórios de progresso.", starred: true },
-  { id: 2, title: "Padrão de nomenclatura de branches Git", cat: "dev", catLabel: "Padrões de Dev", author: "Marcos", updated: "05/06/2026", tags: ["git", "branches", "padrao"], content: "# Padrão de Branches Git\n\n## Prefixos\n- `feature/` — novas funcionalidades\n- `fix/` — correções de bugs\n- `hotfix/` — correções urgentes em produção\n- `chore/` — manutenção e refatoração\n- `docs/` — documentação\n\n## Exemplos\n- `feature/autenticacao-oauth`\n- `fix/calculo-imposto`\n- `hotfix/crash-login`", starred: true },
-  { id: 3, title: "Contrato padrão de desenvolvimento", cat: "templates", catLabel: "Modelos e Templates", author: "Fernanda", updated: "01/06/2026", tags: ["contrato", "template", "juridico"], content: "Template de contrato para projetos de desenvolvimento customizado.", starred: false },
-  { id: 4, title: "Deploy em produção com Docker", cat: "tutorials", catLabel: "Tutoriais", author: "Carlos", updated: "28/05/2026", tags: ["docker", "deploy", "devops"], content: "# Deploy com Docker\n\nPasso a passo para realizar deploy seguro em produção usando Docker e Docker Compose.", starred: false },
-  { id: 5, title: "Perfil – Nexus Retail", cat: "clients", catLabel: "Clientes", author: "Julia", updated: "09/06/2026", tags: ["nexus", "cliente", "retail"], content: "Informações sobre o cliente Nexus Retail: contatos, histórico de projetos e preferências.", starred: false },
-  { id: 6, title: "Links úteis – APIs de pagamento", cat: "links", catLabel: "Links Úteis", author: "Rafael", updated: "06/06/2026", tags: ["apis", "pagamento", "stripe", "pix"], content: "Coleção de links para documentações de APIs de pagamento: Stripe, Pagar.me, Mercado Pago, PagSeguro.", starred: false },
-];
+interface UiArticle {
+  id: number;
+  title: string;
+  cat: string | null;
+  catLabel: string;
+  author: string;
+  updated: string;
+  tags: string[];
+  content: string;
+  starred: boolean;
+}
+
+function toUiArticle(a: ApiArticle): UiArticle {
+  return {
+    id: a.id,
+    title: a.title,
+    cat: a.category_id,
+    catLabel: categories.find((c) => c.id === a.category_id)?.label ?? "Sem categoria",
+    author: a.author_name ?? "—",
+    updated: a.updated_at ? new Date(a.updated_at).toLocaleDateString("pt-BR") : "—",
+    tags: a.tags ?? [],
+    content: a.content ?? "",
+    starred: a.starred,
+  };
+}
+
+const emptyForm = { title: "", content: "", tagsRaw: "" };
 
 export function Knowledge() {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [selectedArticle, setSelectedArticle] = useState<typeof articles[0] | null>(articles[0]);
+  const [selectedArticle, setSelectedArticle] = useState<UiArticle | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [articles, setArticles] = useState<UiArticle[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+
+  const loadArticles = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await articlesApi.list();
+      const mapped = data.map(toUiArticle);
+      setArticles(mapped);
+      setSelectedArticle((prev) => prev ?? mapped[0] ?? null);
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível carregar a base de conhecimento.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadArticles();
+  }, [loadArticles]);
+
+  async function handleCreateArticle() {
+    if (!form.title.trim()) return;
+    setSaving(true);
+    try {
+      const tags = form.tagsRaw.split(",").map((t) => t.trim()).filter(Boolean);
+      await articlesApi.create({ title: form.title, content: form.content, tags });
+      setForm(emptyForm);
+      setShowModal(false);
+      await loadArticles();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível criar o documento.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const filtered = articles.filter((a) => {
     const matchCat = !activeCategory || a.cat === activeCategory;
@@ -37,6 +97,11 @@ export function Knowledge() {
 
   return (
     <div className="flex h-full overflow-hidden">
+      {error && (
+        <div className="absolute top-2 left-2 right-2 z-20 text-sm rounded-lg px-4 py-2.5" style={{ background: "#FEF2F2", color: "#991B1B" }}>
+          {error}
+        </div>
+      )}
       {/* Left sidebar */}
       <div className="w-56 flex-shrink-0 border-r flex flex-col" style={{ borderColor: "var(--border)", background: "var(--card)" }}>
         <div className="p-3 border-b" style={{ borderColor: "var(--border)" }}>
@@ -66,7 +131,7 @@ export function Knowledge() {
             {categories.map(cat => (
               <button key={cat.id} onClick={() => setActiveCategory(cat.id)} className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between text-xs transition-colors hover:bg-muted" style={{ color: activeCategory === cat.id ? "var(--primary)" : "var(--foreground)", background: activeCategory === cat.id ? "var(--accent)" : "transparent" }}>
                 <span className="flex items-center gap-1.5 min-w-0"><span>{cat.icon}</span><span className="truncate">{cat.label}</span></span>
-                <span className="text-xs flex-shrink-0" style={{ color: "var(--muted-foreground)" }}>{cat.count}</span>
+                <span className="text-xs flex-shrink-0" style={{ color: "var(--muted-foreground)" }}>{articles.filter(a => a.cat === cat.id).length}</span>
               </button>
             ))}
           </div>
@@ -163,22 +228,49 @@ export function Knowledge() {
             <div className="p-6 space-y-4">
               <div>
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Título</label>
-                <input type="text" placeholder="Título do documento" className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }} />
+                <input
+                  type="text"
+                  placeholder="Título do documento"
+                  value={form.title}
+                  onChange={(e) => setForm({ ...form, title: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                />
               </div>
               <div>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Categoria</label>
-                <select className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}>
-                  {categories.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-                </select>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Conteúdo</label>
+                <textarea
+                  rows={4}
+                  placeholder="Escreva o conteúdo (aceita # títulos e - listas)"
+                  value={form.content}
+                  onChange={(e) => setForm({ ...form, content: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none resize-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                />
               </div>
               <div>
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Tags (separadas por vírgula)</label>
-                <input type="text" placeholder="ex: processo, cliente, onboarding" className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }} />
+                <input
+                  type="text"
+                  placeholder="ex: processo, cliente, onboarding"
+                  value={form.tagsRaw}
+                  onChange={(e) => setForm({ ...form, tagsRaw: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                />
               </div>
             </div>
             <div className="flex gap-3 px-6 pb-6">
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 rounded-lg text-sm font-semibold" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>Criar</button>
+              <button onClick={() => { setShowModal(false); setForm(emptyForm); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
+              <button
+                onClick={handleCreateArticle}
+                disabled={saving || !form.title.trim()}
+                className="flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+                style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+              >
+                {saving && <Loader2 size={13} className="animate-spin" />}
+                Criar
+              </button>
             </div>
           </div>
         </div>

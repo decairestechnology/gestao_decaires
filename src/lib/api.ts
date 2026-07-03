@@ -74,3 +74,169 @@ export const leadsApi = {
     await handleResponse(res);
   },
 };
+
+export interface Project {
+  id: number;
+  name: string;
+  client: string | null;
+  description: string | null;
+  responsible_name: string | null;
+  start_date: string | null;
+  deadline: string | null;
+  progress: number;
+  status: string;
+  priority: string;
+  tasks_done: number;
+  tasks_total: number;
+  created_at: string;
+}
+
+export interface Transaction {
+  id: number;
+  date: string;
+  description: string;
+  category: string | null;
+  project_id: number | null;
+  client: string | null;
+  type: string;
+  value: string;
+  payment_method: string | null;
+  status: string;
+  created_at: string;
+}
+
+export interface AgendaEvent {
+  id: number;
+  title: string;
+  date: string;
+  start_time: string | null;
+  end_time: string | null;
+  location: string | null;
+  project_id: number | null;
+  responsible_name: string | null;
+  status: string;
+  type: string | null;
+  created_at: string;
+}
+
+export interface Goal {
+  id: number;
+  title: string;
+  description: string | null;
+  responsible_name: string | null;
+  deadline: string | null;
+  progress: number;
+  priority: string;
+  status: string;
+  category: string | null;
+  created_at: string;
+  okrs: { id: number; description: string; progress: number }[];
+}
+
+export interface Idea {
+  id: number;
+  title: string;
+  description: string | null;
+  category: string | null;
+  author_name: string | null;
+  priority: string;
+  revenue_potential: string | null;
+  complexity: string | null;
+  target_audience: string | null;
+  status: string;
+  score_viability: number | null;
+  score_commercial: number | null;
+  score_innovation: number | null;
+  score_cost: number | null;
+  score_time: number | null;
+  created_at: string;
+}
+
+export interface Article {
+  id: number;
+  title: string;
+  category_id: string | null;
+  author_name: string | null;
+  content: string | null;
+  starred: boolean;
+  updated_at: string;
+  created_at: string;
+  tags: string[];
+}
+
+export interface Platform {
+  id: number;
+  name: string;
+  logo_emoji: string | null;
+  description: string | null;
+  category: string | null;
+  status: string;
+  responsible_name: string | null;
+  launch_date: string | null;
+  users_count: number;
+  revenue: string;
+  monthly_costs: string;
+  public_link: string | null;
+  repo_link: string | null;
+  prod_link: string | null;
+  staging_link: string | null;
+  created_at: string;
+  tech: string[];
+}
+
+export interface ContentPost {
+  id: number;
+  title: string;
+  caption: string | null;
+  platform: string | null;
+  type: string | null;
+  scheduled_date: string | null;
+  responsible_name: string | null;
+  status: string;
+  cta: string | null;
+  created_at: string;
+  hashtags: string[];
+}
+
+// --- Genérico: listar e criar num endpoint qualquer ---
+function makeResource<T = any>(path: string) {
+  return {
+    async list(): Promise<T[]> {
+      const res = await fetch(`/api/${path}`, { headers: await authHeaders() });
+      return handleResponse(res);
+    },
+    async create(data: any): Promise<T> {
+      const res = await fetch(`/api/${path}`, {
+        method: "POST",
+        headers: await authHeaders(),
+        body: JSON.stringify(data),
+      });
+      return handleResponse(res);
+    },
+  };
+}
+
+export const projectsApi = {
+  ...makeResource("projects"),
+  async updateProgress(id: number, patch: { status?: string; progress?: number }) {
+    const res = await fetch(`/api/projects/${id}`, {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify(patch),
+    });
+    return handleResponse(res);
+  },
+};
+
+export const transactionsApi = makeResource("transactions");
+export const eventsApi = makeResource("events");
+export const goalsApi = makeResource("goals");
+export const ideasApi = makeResource("ideas");
+export const articlesApi = makeResource("articles");
+export const platformsApi = makeResource("platforms");
+export const contentApi = makeResource("content");
+
+export async function fetchDashboard() {
+  const res = await fetch("/api/dashboard", { headers: await authHeaders() });
+  return handleResponse(res);
+}

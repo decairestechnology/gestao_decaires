@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Search, Plus, LayoutGrid, List, Columns3, X, ArrowRight, Clock, CheckSquare, User, Calendar, ChevronDown, Filter } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Search, Plus, LayoutGrid, List, Columns3, X, ArrowRight, Clock, CheckSquare, User, Calendar, ChevronDown, Filter, Loader2 } from "lucide-react";
+import { projectsApi, type Project as ApiProject } from "../../lib/api";
 
 type ViewMode = "cards" | "list" | "kanban";
 
@@ -14,32 +15,39 @@ const statusMeta: Record<string, { bg: string; text: string; dot: string }> = {
 
 const priorityColors: Record<string, string> = { Alta: "#EF4444", Média: "#F59E0B", Baixa: "#10B981" };
 
-const projects = [
-  {
-    id: 1, name: "Projeto Alpha", client: "TechCorp SA", desc: "Plataforma SaaS para gestão de RH com módulo de ponto eletrônico e integração com folha.", responsible: "Marcos Lima", team: ["ML", "JP", "CA"],
-    start: "01/03/2026", deadline: "30/06/2026", progress: 68, status: "Em andamento", priority: "Alta", tasks: { done: 34, total: 50 }, delayed: false,
-  },
-  {
-    id: 2, name: "App Mobile Nexus", client: "Nexus Retail", desc: "App de fidelidade com gamificação para rede de varejo com 200 lojas e sistema de cashback.", responsible: "Julia Prado", team: ["JP", "RA", "FB"],
-    start: "15/04/2026", deadline: "15/07/2026", progress: 45, status: "Em andamento", priority: "Alta", tasks: { done: 18, total: 40 }, delayed: false,
-  },
-  {
-    id: 3, name: "Portal Gov Digital", client: "GovTech SP", desc: "Portal de serviços digitais para prefeitura com autenticação biométrica e emissão de documentos.", responsible: "Carlos Araujo", team: ["CA", "ML"],
-    start: "10/01/2026", deadline: "31/05/2026", progress: 45, status: "Atrasado", priority: "Alta", tasks: { done: 22, total: 48 }, delayed: true,
-  },
-  {
-    id: 4, name: "BI Dashboard Fintech", client: "Fintech SA", desc: "Dashboard analítico com integração de APIs bancárias e visualizações interativas.", responsible: "Rafael Alves", team: ["RA", "FB", "JP"],
-    start: "01/05/2026", deadline: "31/08/2026", progress: 22, status: "Planejamento", priority: "Média", tasks: { done: 5, total: 23 }, delayed: false,
-  },
-  {
-    id: 5, name: "E-commerce Premium", client: "Moda Luxo Ltda", desc: "Loja virtual de alto padrão com experiência personalizada por IA e checkout one-click.", responsible: "Fernanda Braga", team: ["FB", "CA", "ML"],
-    start: "20/02/2026", deadline: "20/05/2026", progress: 88, status: "Em revisão", priority: "Média", tasks: { done: 44, total: 50 }, delayed: false,
-  },
-  {
-    id: 6, name: "CRM Imobiliário", client: "Imóveis Premium", desc: "CRM especializado para corretoras com integração com portais de anúncios e gestão de visitas.", responsible: "João Paulo", team: ["JP", "RA"],
-    start: "01/04/2026", deadline: "30/09/2026", progress: 15, status: "Em andamento", priority: "Baixa", tasks: { done: 6, total: 40 }, delayed: false,
-  },
-];
+interface UiProject {
+  id: number;
+  name: string;
+  client: string;
+  desc: string;
+  responsible: string;
+  team: string[];
+  start: string;
+  deadline: string;
+  progress: number;
+  status: string;
+  priority: string;
+  tasks: { done: number; total: number };
+  delayed: boolean;
+}
+
+function toUiProject(p: ApiProject): UiProject {
+  return {
+    id: p.id,
+    name: p.name,
+    client: p.client ?? "",
+    desc: p.description ?? "",
+    responsible: p.responsible_name ?? "",
+    team: p.responsible_name ? [p.responsible_name.split(" ").map((s) => s[0]).slice(0, 2).join("").toUpperCase()] : [],
+    start: p.start_date ? new Date(p.start_date).toLocaleDateString("pt-BR") : "—",
+    deadline: p.deadline ? new Date(p.deadline).toLocaleDateString("pt-BR") : "—",
+    progress: p.progress ?? 0,
+    status: p.status,
+    priority: p.priority,
+    tasks: { done: p.tasks_done ?? 0, total: p.tasks_total ?? 0 },
+    delayed: p.status === "Atrasado",
+  };
+}
 
 const kanbanStatuses = ["Planejamento", "Em andamento", "Em revisão", "Concluído", "Atrasado"];
 
@@ -56,7 +64,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 interface ProjectDetailProps {
-  project: typeof projects[0];
+  project: UiProject;
   onClose: () => void;
 }
 
@@ -208,12 +216,51 @@ function ProjectDetail({ project, onClose }: ProjectDetailProps) {
   );
 }
 
+const emptyForm = { name: "", client: "", deadline: "", priority: "Média", description: "" };
+
 export function Projects() {
   const [view, setView] = useState<ViewMode>("cards");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("Todos");
-  const [selected, setSelected] = useState<typeof projects[0] | null>(null);
+  const [selected, setSelected] = useState<UiProject | null>(null);
   const [showNewProject, setShowNewProject] = useState(false);
+  const [projects, setProjects] = useState<UiProject[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+
+  const loadProjects = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await projectsApi.list();
+      setProjects(data.map(toUiProject));
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível carregar os projetos.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadProjects();
+  }, [loadProjects]);
+
+  async function handleCreateProject() {
+    if (!form.name.trim()) return;
+    setSaving(true);
+    try {
+      await projectsApi.create(form);
+      setForm(emptyForm);
+      setShowNewProject(false);
+      await loadProjects();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível criar o projeto.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const filtered = projects.filter((p) => {
     const s = search.toLowerCase();
@@ -225,7 +272,16 @@ export function Projects() {
 
   return (
     <div className="p-4 md:p-6 overflow-y-auto h-full" style={{ scrollbarWidth: "none" }}>
-      {/* Toolbar */}
+      {error && (
+        <div className="mb-4 text-sm rounded-lg px-4 py-2.5" style={{ background: "#FEF2F2", color: "#991B1B" }}>
+          {error}
+        </div>
+      )}
+      {loading && (
+        <div className="mb-4 text-sm flex items-center gap-2" style={{ color: "var(--muted-foreground)" }}>
+          <Loader2 size={14} className="animate-spin" /> Carregando projetos...
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2 mb-6">
         <div className="relative flex-1 min-w-48">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--muted-foreground)" }} />
@@ -500,28 +556,27 @@ export function Projects() {
             </div>
             <div className="p-6 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {[["Nome do projeto", "text", "Ex: App Mobile X"], ["Cliente", "text", "Nome do cliente"], ["Responsável", "text", "Nome"], ["Prazo", "date", ""]].map(([l, t, ph]) => (
+                {[["Nome do projeto", "text", "Ex: App Mobile X", "name"], ["Cliente", "text", "Nome do cliente", "client"], ["Prazo", "date", "", "deadline"]].map(([l, t, ph, key]) => (
                   <div key={l as string}>
                     <label className="block text-xs font-bold mb-1.5" style={{ color: "var(--foreground)" }}>{l as string}</label>
                     <input
                       type={t as string}
                       placeholder={ph as string}
+                      value={(form as any)[key as string]}
+                      onChange={(e) => setForm({ ...form, [key as string]: e.target.value })}
                       className="w-full px-3 py-2.5 rounded-xl text-sm border outline-none"
                       style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
                     />
                   </div>
                 ))}
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold mb-1.5" style={{ color: "var(--foreground)" }}>Status</label>
-                  <select className="w-full px-3 py-2.5 rounded-xl text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}>
-                    {Object.keys(statusMeta).map(s => <option key={s}>{s}</option>)}
-                  </select>
-                </div>
                 <div>
                   <label className="block text-xs font-bold mb-1.5" style={{ color: "var(--foreground)" }}>Prioridade</label>
-                  <select className="w-full px-3 py-2.5 rounded-xl text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}>
+                  <select
+                    value={form.priority}
+                    onChange={(e) => setForm({ ...form, priority: e.target.value })}
+                    className="w-full px-3 py-2.5 rounded-xl text-sm border outline-none appearance-none"
+                    style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  >
                     <option>Alta</option><option>Média</option><option>Baixa</option>
                   </select>
                 </div>
@@ -531,6 +586,8 @@ export function Projects() {
                 <textarea
                   rows={2}
                   placeholder="Descreva o projeto..."
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
                   className="w-full px-3 py-2.5 rounded-xl text-sm border outline-none resize-none"
                   style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
                 />
@@ -538,17 +595,19 @@ export function Projects() {
             </div>
             <div className="flex gap-3 px-6 pb-6">
               <button
-                onClick={() => setShowNewProject(false)}
+                onClick={() => { setShowNewProject(false); setForm(emptyForm); }}
                 className="flex-1 py-2.5 rounded-xl text-sm border font-bold"
                 style={{ borderColor: "var(--border)", color: "var(--foreground)" }}
               >
                 Cancelar
               </button>
               <button
-                onClick={() => setShowNewProject(false)}
-                className="flex-1 py-2.5 rounded-xl text-sm font-bold"
+                onClick={handleCreateProject}
+                disabled={saving || !form.name.trim()}
+                className="flex-1 py-2.5 rounded-xl text-sm font-bold disabled:opacity-50 flex items-center justify-center gap-2"
                 style={{ background: "linear-gradient(135deg, #06B6D4, #7C3AED)", color: "white" }}
               >
+                {saving && <Loader2 size={13} className="animate-spin" />}
                 Criar projeto
               </button>
             </div>

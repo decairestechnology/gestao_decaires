@@ -1,3 +1,4 @@
+import { useState, useEffect, useCallback } from "react";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -5,10 +6,14 @@ import {
 import {
   FolderKanban, AlertTriangle, Users, TrendingUp, TrendingDown,
   Wallet, Calendar, Target, ArrowUpRight, ArrowDownRight,
-  Clock, CheckCircle2, Circle, Sparkles, ArrowRight,
+  Clock, CheckCircle2, Circle, Sparkles, ArrowRight, Loader2,
 } from "lucide-react";
 import type { Page } from "../App";
+import { fetchDashboard } from "../../lib/api";
+import { useAuth } from "../auth/AuthContext";
 
+// Gráficos de tendência (últimos 6 meses, funil, metas em barra) ainda são ilustrativos —
+// viram consultas reais quando houver histórico suficiente acumulado no banco.
 const revenueData = [
   { month: "Jan", receita: 18500, despesa: 11200 },
   { month: "Fev", receita: 22000, despesa: 13500 },
@@ -18,39 +23,11 @@ const revenueData = [
   { month: "Jun", receita: 27500, despesa: 13000 },
 ];
 
-const projectStatus = [
-  { name: "Em andamento", value: 8, color: "#06B6D4" },
-  { name: "Planejamento", value: 3, color: "#7C3AED" },
-  { name: "Concluído", value: 12, color: "#10B981" },
-  { name: "Atrasado", value: 2, color: "#EF4444" },
-  { name: "Pausado", value: 1, color: "#F59E0B" },
-];
-
-const funnelData = [
-  { name: "Leads", value: 48, fill: "#06B6D4" },
-  { name: "Contato", value: 32, fill: "#22D3EE" },
-  { name: "Qualificação", value: 21, fill: "#67E8F9" },
-  { name: "Proposta", value: 14, fill: "#A5F3FC" },
-  { name: "Negociação", value: 8, fill: "#CFFAFE" },
-  { name: "Fechados", value: 5, fill: "#E0F9FF" },
-];
-
 const goalsData = [
   { goal: "Receita R$200k", progress: 73, color: "#10B981" },
   { goal: "20 novos clientes", progress: 55, color: "#F59E0B" },
   { goal: "Lançar plataforma", progress: 88, color: "#10B981" },
   { goal: "Equipe 10 pessoas", progress: 33, color: "#EF4444" },
-];
-
-const kpiCards = [
-  { label: "Projetos ativos", value: "11", change: "+2", positive: true, icon: FolderKanban, color: "#06B6D4", bg: "#E0F9FF", page: "projects" as Page },
-  { label: "Projetos atrasados", value: "2", change: "-1", positive: true, icon: AlertTriangle, color: "#EF4444", bg: "#FEF2F2", page: "projects" as Page },
-  { label: "Leads negociação", value: "8", change: "+3", positive: true, icon: Users, color: "#7C3AED", bg: "#F5F3FF", page: "crm" as Page },
-  { label: "Receita mensal", value: "R$27.500", change: "+12%", positive: true, icon: TrendingUp, color: "#10B981", bg: "#ECFDF5", page: "financial" as Page },
-  { label: "Despesas mensais", value: "R$13.000", change: "+5%", positive: false, icon: TrendingDown, color: "#EF4444", bg: "#FEF2F2", page: "financial" as Page },
-  { label: "Saldo atual", value: "R$68.320", change: "+8%", positive: true, icon: Wallet, color: "#06B6D4", bg: "#E0F9FF", page: "financial" as Page },
-  { label: "Compromissos/sem.", value: "9", change: "+1", positive: true, icon: Calendar, color: "#F59E0B", bg: "#FFFBEB", page: "agenda" as Page },
-  { label: "Metas em andamento", value: "4", change: "0", positive: true, icon: Target, color: "#7C3AED", bg: "#F5F3FF", page: "goals" as Page },
 ];
 
 const recentActivity = [
@@ -59,19 +36,6 @@ const recentActivity = [
   { text: "Despesa R$1.200 registrada", time: "1h", icon: Wallet, color: "#EF4444" },
   { text: "Reunião com Innovate agendada", time: "2h", icon: Calendar, color: "#F59E0B" },
   { text: "Meta Q2 atingiu 73%", time: "3h", icon: Target, color: "#10B981" },
-];
-
-const upcomingEvents = [
-  { title: "Alinhamento – Projeto Alpha", time: "09:00", date: "Hoje", type: "Reunião", color: "#06B6D4" },
-  { title: "Entrega proposta – Innovate", time: "14:00", date: "Hoje", type: "Prazo", color: "#EF4444" },
-  { title: "Sprint Review – App Nexus", time: "10:00", date: "Amanhã", type: "Reunião", color: "#06B6D4" },
-  { title: "Apresentação cliente Nexus", time: "15:30", date: "12/Jun", type: "Apresentação", color: "#7C3AED" },
-];
-
-const attentionProjects = [
-  { name: "Portal Gov Digital", client: "GovTech SP", status: "Atrasado", days: 3, progress: 45, color: "#EF4444" },
-  { name: "App Mobile Nexus", client: "Nexus Retail", status: "Em revisão", days: 0, progress: 80, color: "#F59E0B" },
-  { name: "BI Dashboard", client: "Fintech SA", status: "Em andamento", days: 0, progress: 22, color: "#06B6D4" },
 ];
 
 const pendingTasks = [
@@ -109,8 +73,60 @@ interface DashboardProps {
 }
 
 export function Dashboard({ onNavigate }: DashboardProps) {
+  const { user } = useAuth();
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadDashboard = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await fetchDashboard();
+      setData(result);
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível carregar o dashboard.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDashboard();
+  }, [loadDashboard]);
+
+  const statusColorMap: Record<string, string> = {
+    "Em andamento": "#06B6D4", Planejamento: "#7C3AED", Concluído: "#10B981", Atrasado: "#EF4444", Pausado: "#F59E0B", "Em revisão": "#F59E0B",
+  };
+  const stageLabels: Record<string, string> = { new: "Leads", contact: "Contato", qualify: "Qualificação", proposal: "Proposta", negotiation: "Negociação", won: "Fechados" };
+  const stageOrder = ["new", "contact", "qualify", "proposal", "negotiation", "won"];
+
+  const projectStatus = (data?.projectStatusRows ?? []).map((r: any) => ({ name: r.status, value: r.total, color: statusColorMap[r.status] ?? "#94A3B8" }));
+  const funnelMap = new Map((data?.funnelRows ?? []).map((r: any) => [r.stage, r.total]));
+  const funnelData = stageOrder.map((s) => ({ name: stageLabels[s], value: funnelMap.get(s) ?? 0 }));
+  const funnelMax = Math.max(1, ...funnelData.map((f) => f.value));
+
+  const kpiCards = data ? [
+    { label: "Projetos ativos", value: String(data.projects.total), icon: FolderKanban, color: "#06B6D4", bg: "#E0F9FF", page: "projects" as Page },
+    { label: "Projetos atrasados", value: String(data.projects.atrasados), icon: AlertTriangle, color: "#EF4444", bg: "#FEF2F2", page: "projects" as Page },
+    { label: "Leads em negociação", value: String(data.leads.negociacao), icon: Users, color: "#7C3AED", bg: "#F5F3FF", page: "crm" as Page },
+    { label: "Receita do mês", value: `R$${data.financial.receita.toLocaleString("pt-BR")}`, icon: TrendingUp, color: "#10B981", bg: "#ECFDF5", page: "financial" as Page },
+    { label: "Despesas do mês", value: `R$${data.financial.despesa.toLocaleString("pt-BR")}`, icon: TrendingDown, color: "#EF4444", bg: "#FEF2F2", page: "financial" as Page },
+    { label: "Saldo do mês", value: `R$${(data.financial.receita - data.financial.despesa).toLocaleString("pt-BR")}`, icon: Wallet, color: "#06B6D4", bg: "#E0F9FF", page: "financial" as Page },
+    { label: "Compromissos (7 dias)", value: String(data.events.proxima_semana), icon: Calendar, color: "#F59E0B", bg: "#FFFBEB", page: "agenda" as Page },
+    { label: "Metas em andamento", value: String(data.goals.em_andamento), icon: Target, color: "#7C3AED", bg: "#F5F3FF", page: "goals" as Page },
+  ] : [];
+
+  const displayName = user?.displayName || user?.email?.split("@")[0] || "";
+  const todayStr = new Date().toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
+
   return (
     <div className="p-4 md:p-6 space-y-5 overflow-y-auto h-full" style={{ scrollbarWidth: "none" }}>
+      {error && (
+        <div className="text-sm rounded-lg px-4 py-2.5" style={{ background: "#FEF2F2", color: "#991B1B" }}>
+          {error}
+        </div>
+      )}
 
       {/* Welcome Banner */}
       <div
@@ -120,33 +136,27 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         <div>
           <div className="flex items-center gap-2 mb-1">
             <Sparkles size={16} color="rgba(255,255,255,0.8)" />
-            <span className="text-xs font-medium" style={{ color: "rgba(255,255,255,0.8)" }}>
-              Terça-feira, 10 de junho de 2026
+            <span className="text-xs font-medium capitalize" style={{ color: "rgba(255,255,255,0.8)" }}>
+              {todayStr}
             </span>
           </div>
-          <h2 className="text-xl font-extrabold text-white">Bom dia, Daniel! 👋</h2>
+          <h2 className="text-xl font-extrabold text-white">Bom dia{displayName ? `, ${displayName}` : ""}! 👋</h2>
           <p className="text-sm mt-0.5" style={{ color: "rgba(255,255,255,0.75)" }}>
-            Você tem <strong style={{ color: "white" }}>9 compromissos</strong> esta semana e <strong style={{ color: "white" }}>2 projetos</strong> precisam de atenção.
+            {data ? (
+              <>Você tem <strong style={{ color: "white" }}>{data.events.proxima_semana} compromissos</strong> nos próximos 7 dias e <strong style={{ color: "white" }}>{data.projects.atrasados} projetos</strong> precisam de atenção.</>
+            ) : "Carregando seu resumo..."}
           </p>
-        </div>
-        <div className="flex gap-2">
-          <select
-            className="text-xs px-3 py-1.5 rounded-lg font-semibold outline-none"
-            style={{ background: "rgba(255,255,255,0.15)", color: "white", border: "1px solid rgba(255,255,255,0.3)" }}
-          >
-            <option>Este mês</option>
-            <option>Último mês</option>
-            <option>Este trimestre</option>
-          </select>
-          <button
-            className="text-xs px-3 py-1.5 rounded-lg font-semibold"
-            style={{ background: "rgba(255,255,255,0.2)", color: "white", border: "1px solid rgba(255,255,255,0.3)" }}
-          >
-            + Nova atividade
-          </button>
         </div>
       </div>
 
+      {loading && !data && (
+        <div className="flex items-center gap-2 text-sm py-8 justify-center" style={{ color: "var(--muted-foreground)" }}>
+          <Loader2 size={16} className="animate-spin" /> Carregando dashboard...
+        </div>
+      )}
+
+      {data && (
+      <>
       {/* KPI Grid */}
       <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-3">
         {kpiCards.map((card, i) => {
@@ -171,15 +181,6 @@ export function Dashboard({ onNavigate }: DashboardProps) {
               </div>
               <div className="text-xl font-extrabold leading-none mb-2" style={{ color: "var(--foreground)" }}>
                 {card.value}
-              </div>
-              <div className="flex items-center gap-1">
-                {card.positive
-                  ? <ArrowUpRight size={12} style={{ color: "#10B981" }} />
-                  : <ArrowDownRight size={12} style={{ color: "#EF4444" }} />}
-                <span className="text-xs font-bold" style={{ color: card.positive ? "#10B981" : "#EF4444" }}>
-                  {card.change}
-                </span>
-                <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>vs anterior</span>
               </div>
             </button>
           );
@@ -234,7 +235,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         {/* Project Status Donut */}
         <div className="rounded-2xl border p-5 shadow-sm" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
           <div className="font-bold text-sm mb-0.5" style={{ color: "var(--foreground)" }}>Status dos Projetos</div>
-          <div className="text-xs mb-3" style={{ color: "var(--muted-foreground)" }}>26 projetos no total</div>
+          <div className="text-xs mb-3" style={{ color: "var(--muted-foreground)" }}>{data.projects.total} projetos no total</div>
           <div className="flex items-center justify-center mb-3">
             <ResponsiveContainer width={160} height={140}>
               <PieChart>
@@ -267,7 +268,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           <div className="text-xs mb-4" style={{ color: "var(--muted-foreground)" }}>Leads por etapa do funil</div>
           <div className="space-y-2">
             {funnelData.map((f, i) => {
-              const pct = Math.round((f.value / 48) * 100);
+              const pct = Math.round((f.value / funnelMax) * 100);
               return (
                 <div key={i} className="flex items-center gap-3">
                   <div className="text-xs w-20 flex-shrink-0 text-right font-medium" style={{ color: "var(--muted-foreground)" }}>
@@ -324,26 +325,28 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             </button>
           </div>
           <div className="space-y-3">
-            {upcomingEvents.map((e, i) => (
-              <div key={i} className="flex items-start gap-3">
+            {(data.upcomingEvents ?? []).map((e: any) => (
+              <div key={e.id} className="flex items-start gap-3">
                 <div
                   className="w-1 self-stretch rounded-full flex-shrink-0"
-                  style={{ background: e.color, minHeight: 40 }}
+                  style={{ background: "#06B6D4", minHeight: 40 }}
                 />
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-semibold truncate" style={{ color: "var(--foreground)" }}>{e.title}</div>
                   <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                    <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>{e.date} · {e.time}</span>
-                    <span
-                      className="text-xs px-1.5 py-0.5 rounded-md font-medium"
-                      style={{ background: `${e.color}18`, color: e.color }}
-                    >
-                      {e.type}
+                    <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>
+                      {new Date(e.date + "T00:00:00").toLocaleDateString("pt-BR")} {e.start_time ? `· ${e.start_time.slice(0, 5)}` : ""}
+                    </span>
+                    <span className="text-xs px-1.5 py-0.5 rounded-md font-medium" style={{ background: "#06B6D418", color: "#06B6D4" }}>
+                      {e.type ?? "Evento"}
                     </span>
                   </div>
                 </div>
               </div>
             ))}
+            {(data.upcomingEvents ?? []).length === 0 && (
+              <div className="text-xs text-center py-4" style={{ color: "var(--muted-foreground)" }}>Nenhum compromisso próximo</div>
+            )}
           </div>
         </div>
 
@@ -416,41 +419,44 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {attentionProjects.map((p, i) => (
-            <div
-              key={i}
-              className="rounded-xl p-4 border cursor-pointer transition-all hover:shadow-md"
-              style={{ borderColor: `${p.color}30`, background: `${p.color}06` }}
-            >
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-bold text-sm" style={{ color: "var(--foreground)" }}>{p.name}</span>
-                <span
-                  className="text-xs px-2 py-0.5 rounded-full font-bold"
-                  style={{ background: `${p.color}18`, color: p.color }}
-                >
-                  {p.status}
-                </span>
-              </div>
-              <div className="text-xs mb-3" style={{ color: "var(--muted-foreground)" }}>Cliente: {p.client}</div>
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>Progresso</span>
-                <span className="text-xs font-bold" style={{ color: "var(--foreground)" }}>{p.progress}%</span>
-              </div>
-              <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--border)" }}>
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{ width: `${p.progress}%`, background: p.color }}
-                />
-              </div>
-              {p.days > 0 && (
-                <div className="flex items-center gap-1 mt-2 text-xs font-semibold" style={{ color: "#EF4444" }}>
-                  <Clock size={11} />{p.days} dia{p.days > 1 ? "s" : ""} de atraso
+          {(data.recentProjects ?? []).map((p: any) => {
+            const color = statusColorMap[p.status] ?? "#94A3B8";
+            return (
+              <div
+                key={p.id}
+                className="rounded-xl p-4 border cursor-pointer transition-all hover:shadow-md"
+                style={{ borderColor: `${color}30`, background: `${color}06` }}
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-bold text-sm" style={{ color: "var(--foreground)" }}>{p.name}</span>
+                  <span
+                    className="text-xs px-2 py-0.5 rounded-full font-bold"
+                    style={{ background: `${color}18`, color }}
+                  >
+                    {p.status}
+                  </span>
                 </div>
-              )}
-            </div>
-          ))}
+                <div className="text-xs mb-3" style={{ color: "var(--muted-foreground)" }}>Cliente: {p.client ?? "—"}</div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>Progresso</span>
+                  <span className="text-xs font-bold" style={{ color: "var(--foreground)" }}>{p.progress}%</span>
+                </div>
+                <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--border)" }}>
+                  <div
+                    className="h-full rounded-full transition-all"
+                    style={{ width: `${p.progress}%`, background: color }}
+                  />
+                </div>
+              </div>
+            );
+          })}
+          {(data.recentProjects ?? []).length === 0 && (
+            <div className="text-xs text-center py-4 col-span-3" style={{ color: "var(--muted-foreground)" }}>Nenhum projeto cadastrado ainda</div>
+          )}
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }

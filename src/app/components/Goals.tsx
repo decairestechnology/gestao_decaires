@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { Plus, X, Target, ChevronDown, ChevronUp } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Plus, X, Target, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { goalsApi, type Goal as ApiGoal } from "../../lib/api";
 
 const categories = ["Financeiras", "Comerciais", "Marketing", "Desenvolvimento", "Operacionais", "Crescimento", "Clientes"];
 
@@ -8,14 +9,33 @@ const categoryColors: Record<string, string> = {
   Desenvolvimento: "#3B82F6", Operacionais: "#F59E0B", Crescimento: "#EF4444", Clientes: "#8B5CF6",
 };
 
-const goals = [
-  { id: 1, title: "Atingir R$ 200k de receita no Q2", desc: "Crescer a receita mensal para superar a meta trimestral estabelecida no planejamento estratégico.", responsible: "Daniel", deadline: "30/06/2026", progress: 73, priority: "Alta", status: "Em andamento", category: "Financeiras", okrs: [{ kr: "Fechar 3 novos contratos de desenvolvimento", progress: 67 }, { kr: "Aumentar ticket médio em 15%", progress: 80 }, { kr: "Renovar 100% dos contratos vigentes", progress: 75 }] },
-  { id: 2, title: "Conquistar 20 novos clientes em 2026", desc: "Expandir a base de clientes ativos através de prospecção ativa e marketing de conteúdo.", responsible: "Julia", deadline: "31/12/2026", progress: 55, priority: "Alta", status: "Em andamento", category: "Comerciais", okrs: [{ kr: "Gerar 50 leads qualificados por mês", progress: 60 }, { kr: "Taxa de conversão acima de 20%", progress: 45 }, { kr: "NPS acima de 8 com novos clientes", progress: 70 }] },
-  { id: 3, title: "Lançar DeCaires HUB em produção", desc: "Concluir o desenvolvimento e lançar a plataforma SaaS principal da empresa.", responsible: "Marcos", deadline: "30/09/2026", progress: 88, priority: "Alta", status: "Em andamento", category: "Desenvolvimento", okrs: [{ kr: "Completar todos os módulos core", progress: 90 }, { kr: "Atingir 99.9% de uptime nos testes", progress: 95 }, { kr: "Onboarding dos primeiros 10 clientes beta", progress: 70 }] },
-  { id: 4, title: "Crescer seguidores LinkedIn para 5k", desc: "Fortalecer a presença digital da empresa no LinkedIn como canal de geração de leads.", responsible: "Fernanda", deadline: "31/12/2026", progress: 38, priority: "Média", status: "Em andamento", category: "Marketing", okrs: [{ kr: "Publicar 3 conteúdos por semana", progress: 55 }, { kr: "Taxa de engajamento acima de 5%", progress: 30 }, { kr: "10 artigos técnicos publicados", progress: 20 }] },
-  { id: 5, title: "Contratar 3 desenvolvedores sênior", desc: "Expandir a equipe técnica para suportar o crescimento dos projetos.", responsible: "Daniel", deadline: "31/08/2026", progress: 33, priority: "Média", status: "Em andamento", category: "Crescimento", okrs: [{ kr: "Realizar 20 entrevistas técnicas", progress: 50 }, { kr: "Aprovação de 3 candidatos", progress: 33 }, { kr: "Onboarding concluído em menos de 2 semanas", progress: 0 }] },
-  { id: 6, title: "Implementar suporte 24/7 para clientes Premium", desc: "Criar uma estrutura de suporte contínuo para clientes de maior valor.", responsible: "Rafael", deadline: "30/07/2026", progress: 60, priority: "Baixa", status: "Em andamento", category: "Clientes", okrs: [{ kr: "Contratar 2 analistas de suporte", progress: 50 }, { kr: "SLA de resposta em menos de 1h", progress: 70 }, { kr: "Satisfação do cliente acima de 9/10", progress: 65 }] },
-];
+interface UiGoal {
+  id: number;
+  title: string;
+  desc: string;
+  responsible: string;
+  deadline: string;
+  progress: number;
+  priority: string;
+  status: string;
+  category: string;
+  okrs: { kr: string; progress: number }[];
+}
+
+function toUiGoal(g: ApiGoal): UiGoal {
+  return {
+    id: g.id,
+    title: g.title,
+    desc: g.description ?? "",
+    responsible: g.responsible_name ?? "",
+    deadline: g.deadline ? new Date(g.deadline).toLocaleDateString("pt-BR") : "—",
+    progress: g.progress ?? 0,
+    priority: g.priority,
+    status: g.status,
+    category: g.category ?? "Operacionais",
+    okrs: (g.okrs ?? []).map((o) => ({ kr: o.description, progress: o.progress })),
+  };
+}
 
 const priorityColors: Record<string, string> = { Alta: "#EF4444", Média: "#F59E0B", Baixa: "#10B981" };
 const statusColors: Record<string, { bg: string; text: string }> = {
@@ -25,7 +45,7 @@ const statusColors: Record<string, { bg: string; text: string }> = {
   Atrasada: { bg: "#FEF2F2", text: "#991B1B" },
 };
 
-function GoalCard({ goal }: { goal: typeof goals[0] }) {
+function GoalCard({ goal }: { goal: UiGoal }) {
   const [expanded, setExpanded] = useState(false);
   const s = statusColors[goal.status] ?? { bg: "#F1F5F9", text: "#475569" };
   const catColor = categoryColors[goal.category] ?? "#06B6D4";
@@ -79,15 +99,59 @@ function GoalCard({ goal }: { goal: typeof goals[0] }) {
   );
 }
 
+const emptyForm = { title: "", deadline: "", description: "", category: "Operacionais", priority: "Média" };
+
 export function Goals() {
   const [activeCat, setActiveCat] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const [goals, setGoals] = useState<UiGoal[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+
+  const loadGoals = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await goalsApi.list();
+      setGoals(data.map(toUiGoal));
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível carregar as metas.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadGoals();
+  }, [loadGoals]);
+
+  async function handleCreateGoal() {
+    if (!form.title.trim()) return;
+    setSaving(true);
+    try {
+      await goalsApi.create(form);
+      setForm(emptyForm);
+      setShowModal(false);
+      await loadGoals();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível criar a meta.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const filtered = activeCat ? goals.filter(g => g.category === activeCat) : goals;
-  const avgProgress = Math.round(goals.reduce((a, g) => a + g.progress, 0) / goals.length);
+  const avgProgress = goals.length ? Math.round(goals.reduce((a, g) => a + g.progress, 0) / goals.length) : 0;
 
   return (
     <div className="p-6 overflow-y-auto h-full" style={{ scrollbarWidth: "none" }}>
+      {error && (
+        <div className="mb-4 text-sm rounded-lg px-4 py-2.5" style={{ background: "#FEF2F2", color: "#991B1B" }}>
+          {error}
+        </div>
+      )}
       {/* Header Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {[
@@ -134,34 +198,66 @@ export function Goals() {
               <button onClick={() => setShowModal(false)} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
             </div>
             <div className="p-6 space-y-4">
-              {[["Título", "text", "Descreva a meta"], ["Responsável", "text", "Nome"], ["Prazo", "date", ""]].map(([l, t, ph]) => (
+              {[["Título", "text", "Descreva a meta", "title"], ["Prazo", "date", "", "deadline"]].map(([l, t, ph, key]) => (
                 <div key={l as string}>
                   <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>{l as string}</label>
-                  <input type={t as string} placeholder={ph as string} className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }} />
+                  <input
+                    type={t as string}
+                    placeholder={ph as string}
+                    value={(form as any)[key as string]}
+                    onChange={(e) => setForm({ ...form, [key as string]: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  />
                 </div>
               ))}
               <div>
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Descrição</label>
-                <textarea rows={2} placeholder="Detalhes da meta..." className="w-full px-3 py-2 rounded-lg text-sm border outline-none resize-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }} />
+                <textarea
+                  rows={2}
+                  placeholder="Detalhes da meta..."
+                  value={form.description}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none resize-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Categoria</label>
-                  <select className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}>
+                  <select
+                    value={form.category}
+                    onChange={(e) => setForm({ ...form, category: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  >
                     {categories.map(c => <option key={c}>{c}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Prioridade</label>
-                  <select className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}>
+                  <select
+                    value={form.priority}
+                    onChange={(e) => setForm({ ...form, priority: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  >
                     <option>Alta</option><option>Média</option><option>Baixa</option>
                   </select>
                 </div>
               </div>
             </div>
             <div className="flex gap-3 px-6 pb-6">
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
-              <button onClick={() => setShowModal(false)} className="flex-1 py-2 rounded-lg text-sm font-semibold" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>Criar meta</button>
+              <button onClick={() => { setShowModal(false); setForm(emptyForm); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
+              <button
+                onClick={handleCreateGoal}
+                disabled={saving || !form.title.trim()}
+                className="flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+                style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+              >
+                {saving && <Loader2 size={13} className="animate-spin" />}
+                Criar meta
+              </button>
             </div>
           </div>
         </div>

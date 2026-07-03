@@ -1,7 +1,10 @@
-import { useState } from "react";
-import { Plus, Download, TrendingUp, TrendingDown, Wallet, AlertCircle, X } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Plus, Download, TrendingUp, TrendingDown, Wallet, AlertCircle, X, Loader2 } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { transactionsApi, type Transaction as ApiTransaction } from "../../lib/api";
 
+// Gráficos de fluxo mensal e distribuição de despesas ainda usam dados de exemplo —
+// vão virar consultas agregadas reais numa próxima etapa, quando houver histórico suficiente.
 const monthlyData = [
   { month: "Jan", receita: 18500, despesa: 11200 },
   { month: "Fev", receita: 22000, despesa: 13500 },
@@ -19,15 +22,31 @@ const expenseTypes = [
   { name: "Outros", value: 13, color: "#94A3B8" },
 ];
 
-const transactions = [
-  { date: "10/06/2026", desc: "Pagamento – Projeto Alpha", cat: "Serviços", project: "Alpha", client: "TechCorp", type: "receita", value: 12000, payment: "Transferência", status: "Confirmado" },
-  { date: "09/06/2026", desc: "Assinatura AWS", cat: "Infraestrutura", project: "—", client: "—", type: "despesa", value: 890, payment: "Cartão", status: "Confirmado" },
-  { date: "08/06/2026", desc: "Pagamento parcial – Nexus", cat: "Serviços", project: "Nexus", client: "Nexus Retail", type: "receita", value: 20000, payment: "Transferência", status: "Confirmado" },
-  { date: "08/06/2026", desc: "Folha de pagamento – Junho", cat: "Pessoal", project: "—", client: "—", type: "despesa", value: 8500, payment: "Transferência", status: "Pendente" },
-  { date: "07/06/2026", desc: "Google Ads – Campanha Q2", cat: "Marketing", project: "—", client: "—", type: "despesa", value: 1200, payment: "Cartão", status: "Confirmado" },
-  { date: "05/06/2026", desc: "Serviço mensal – E-commerce Plus", cat: "Serviços", project: "E-commerce", client: "Moda Luxo", type: "receita", value: 3500, payment: "Pix", status: "Confirmado" },
-  { date: "03/06/2026", desc: "Contrato de manutenção – FinTech SA", cat: "Serviços", project: "BI Dashboard", client: "Fintech SA", type: "receita", value: 2800, payment: "Boleto", status: "A receber" },
-];
+interface UiTransaction {
+  id: number;
+  date: string;
+  desc: string;
+  cat: string;
+  project: string;
+  type: string;
+  value: number;
+  payment: string;
+  status: string;
+}
+
+function toUiTransaction(t: ApiTransaction): UiTransaction {
+  return {
+    id: t.id,
+    date: t.date ? new Date(t.date).toLocaleDateString("pt-BR") : "—",
+    desc: t.description,
+    cat: t.category ?? "—",
+    project: t.client ?? "—",
+    type: t.type,
+    value: Number(t.value) || 0,
+    payment: t.payment_method ?? "—",
+    status: t.status,
+  };
+}
 
 const statusColors: Record<string, { bg: string; text: string }> = {
   Confirmado: { bg: "#ECFDF5", text: "#065F46" },
@@ -35,18 +54,62 @@ const statusColors: Record<string, { bg: string; text: string }> = {
   "A receber": { bg: "#EFF6FF", text: "#1D4ED8" },
 };
 
+const emptyForm = { description: "", value: "", category: "", date: "", payment_method: "Transferência" };
+
 export function Financial() {
   const [showModal, setShowModal] = useState<"receita" | "despesa" | null>(null);
   const [period, setPeriod] = useState("Este mês");
+  const [transactions, setTransactions] = useState<UiTransaction[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [form, setForm] = useState(emptyForm);
+  const [saving, setSaving] = useState(false);
+
+  const loadTransactions = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await transactionsApi.list();
+      setTransactions(data.map(toUiTransaction));
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível carregar os lançamentos.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadTransactions();
+  }, [loadTransactions]);
+
+  async function handleSaveTransaction() {
+    if (!showModal || !form.description.trim() || !form.value) return;
+    setSaving(true);
+    try {
+      await transactionsApi.create({ ...form, type: showModal, value: Number(form.value) });
+      setForm(emptyForm);
+      setShowModal(null);
+      await loadTransactions();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível salvar o lançamento.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   const totalReceita = transactions.filter(t => t.type === "receita").reduce((a, t) => a + t.value, 0);
   const totalDespesa = transactions.filter(t => t.type === "despesa").reduce((a, t) => a + t.value, 0);
-  const saldo = 68320;
+  const saldo = totalReceita - totalDespesa;
   const aReceber = transactions.filter(t => t.status === "A receber").reduce((a, t) => a + t.value, 0);
   const aPagar = transactions.filter(t => t.status === "Pendente").reduce((a, t) => a + t.value, 0);
 
   return (
     <div className="p-6 overflow-y-auto h-full" style={{ scrollbarWidth: "none" }}>
+      {error && (
+        <div className="mb-4 text-sm rounded-lg px-4 py-2.5" style={{ background: "#FEF2F2", color: "#991B1B" }}>
+          {error}
+        </div>
+      )}
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <select value={period} onChange={(e) => setPeriod(e.target.value)}
@@ -146,10 +209,10 @@ export function Financial() {
               </tr>
             </thead>
             <tbody>
-              {transactions.map((t, i) => {
+              {transactions.map((t) => {
                 const s = statusColors[t.status] ?? { bg: "#F1F5F9", text: "#475569" };
                 return (
-                  <tr key={i} className="border-b last:border-0 hover:bg-muted transition-colors" style={{ borderColor: "var(--border)" }}>
+                  <tr key={t.id} className="border-b last:border-0 hover:bg-muted transition-colors" style={{ borderColor: "var(--border)" }}>
                     <td className="px-4 py-3 text-xs" style={{ color: "var(--muted-foreground)" }}>{t.date}</td>
                     <td className="px-4 py-3 text-xs font-medium" style={{ color: "var(--foreground)" }}>{t.desc}</td>
                     <td className="px-4 py-3 text-xs" style={{ color: "var(--muted-foreground)" }}>{t.cat}</td>
@@ -184,22 +247,40 @@ export function Financial() {
               <button onClick={() => setShowModal(null)} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
             </div>
             <div className="p-6 space-y-4">
-              {[["Descrição", "text", "Ex: Pagamento Projeto X"], ["Valor (R$)", "number", "0,00"], ["Categoria", "text", "Ex: Serviços, Pessoal..."], ["Data", "date", ""]].map(([l, t, ph]) => (
+              {[["Descrição", "text", "Ex: Pagamento Projeto X", "description"], ["Valor (R$)", "number", "0,00", "value"], ["Categoria", "text", "Ex: Serviços, Pessoal...", "category"], ["Data", "date", "", "date"]].map(([l, t, ph, key]) => (
                 <div key={l as string}>
                   <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>{l as string}</label>
-                  <input type={t as string} placeholder={ph as string} className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }} />
+                  <input
+                    type={t as string}
+                    placeholder={ph as string}
+                    value={(form as any)[key as string]}
+                    onChange={(e) => setForm({ ...form, [key as string]: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  />
                 </div>
               ))}
               <div>
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Forma de pagamento</label>
-                <select className="w-full px-3 py-2 rounded-lg text-sm border outline-none" style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}>
+                <select
+                  value={form.payment_method}
+                  onChange={(e) => setForm({ ...form, payment_method: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                >
                   {["Transferência", "Pix", "Cartão", "Boleto", "Dinheiro"].map(p => <option key={p}>{p}</option>)}
                 </select>
               </div>
             </div>
             <div className="flex gap-3 px-6 pb-6">
-              <button onClick={() => setShowModal(null)} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
-              <button onClick={() => setShowModal(null)} className="flex-1 py-2 rounded-lg text-sm font-semibold" style={{ background: showModal === "receita" ? "#10B981" : "#EF4444", color: "white" }}>
+              <button onClick={() => { setShowModal(null); setForm(emptyForm); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
+              <button
+                onClick={handleSaveTransaction}
+                disabled={saving || !form.description.trim() || !form.value}
+                className="flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
+                style={{ background: showModal === "receita" ? "#10B981" : "#EF4444", color: "white" }}
+              >
+                {saving && <Loader2 size={13} className="animate-spin" />}
                 Registrar {showModal === "receita" ? "receita" : "despesa"}
               </button>
             </div>
