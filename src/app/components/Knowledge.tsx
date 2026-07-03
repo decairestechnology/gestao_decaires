@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { Search, Plus, Star, Clock, ChevronRight, FileText, Folder, Tag, X, BookOpen, Loader2, Pencil, Trash2, Paperclip, Download, History, RotateCcw } from "lucide-react";
-import { articlesApi, articleFilesApi, articleRevisionsApi, projectsApi, type Article as ApiArticle, type ArticleFile, type ArticleRevision, type Project } from "../../lib/api";
+import { articlesApi, articleFilesApi, articleRevisionsApi, projectsApi, fetchAllProjectFiles, type Article as ApiArticle, type ArticleFile, type ArticleRevision, type Project, type AllProjectFile } from "../../lib/api";
 import { supabase, PROJECT_FILES_BUCKET } from "../../lib/supabase";
 
 const categories = [
@@ -65,6 +65,9 @@ export function Knowledge() {
   const [revisionsLoading, setRevisionsLoading] = useState(false);
   const [viewingRevision, setViewingRevision] = useState<ArticleRevision | null>(null);
   const [restoringId, setRestoringId] = useState<number | null>(null);
+  const [showProjectFiles, setShowProjectFiles] = useState(false);
+  const [projectFiles, setProjectFiles] = useState<AllProjectFile[]>([]);
+  const [projectFilesLoading, setProjectFilesLoading] = useState(false);
 
   const loadArticles = useCallback(async () => {
     setLoading(true);
@@ -89,6 +92,26 @@ export function Knowledge() {
   function projectName(id: number | null) {
     if (!id) return null;
     return projects.find((p) => p.id === id)?.name ?? null;
+  }
+
+  async function openProjectFiles() {
+    setSelectedArticle(null);
+    setShowProjectFiles(true);
+    setProjectFilesLoading(true);
+    try {
+      setProjectFiles(await fetchAllProjectFiles());
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível carregar os arquivos dos projetos.");
+    } finally {
+      setProjectFilesLoading(false);
+    }
+  }
+
+  function fmtProjectFileBytes(n: number | null) {
+    if (!n) return "";
+    if (n < 1024) return `${n} B`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
   }
 
   const loadRevisions = useCallback(async (articleId: number) => {
@@ -272,7 +295,7 @@ export function Knowledge() {
           <div className="mb-3">
             <div className="text-xs font-semibold px-2 py-1 mb-1" style={{ color: "var(--muted-foreground)" }}>FAVORITOS</div>
             {starred.map(a => (
-              <button key={a.id} onClick={() => { setSelectedArticle(a); setConfirmDelete(false); }} className="w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2 text-xs transition-colors hover:bg-muted" style={{ color: selectedArticle?.id === a.id ? "var(--primary)" : "var(--foreground)", background: selectedArticle?.id === a.id ? "var(--accent)" : "transparent" }}>
+              <button key={a.id} onClick={() => { setSelectedArticle(a); setConfirmDelete(false); setShowProjectFiles(false); }} className="w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2 text-xs transition-colors hover:bg-muted" style={{ color: selectedArticle?.id === a.id ? "var(--primary)" : "var(--foreground)", background: selectedArticle?.id === a.id ? "var(--accent)" : "transparent" }}>
                 <Star size={11} style={{ color: "#F59E0B", flexShrink: 0 }} />
                 <span className="truncate">{a.title}</span>
               </button>
@@ -281,22 +304,25 @@ export function Knowledge() {
           {/* Categories */}
           <div className="mb-3">
             <div className="text-xs font-semibold px-2 py-1 mb-1" style={{ color: "var(--muted-foreground)" }}>CATEGORIAS</div>
-            <button onClick={() => setActiveCategory(null)} className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between text-xs transition-colors hover:bg-muted" style={{ color: !activeCategory ? "var(--primary)" : "var(--foreground)", background: !activeCategory ? "var(--accent)" : "transparent" }}>
+            <button onClick={() => { setActiveCategory(null); setShowProjectFiles(false); }} className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between text-xs transition-colors hover:bg-muted" style={{ color: !activeCategory && !showProjectFiles ? "var(--primary)" : "var(--foreground)", background: !activeCategory && !showProjectFiles ? "var(--accent)" : "transparent" }}>
               <span className="flex items-center gap-2"><BookOpen size={11} />Todos</span>
               <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>{articles.length}</span>
             </button>
             {categories.map(cat => (
-              <button key={cat.id} onClick={() => setActiveCategory(cat.id)} className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between text-xs transition-colors hover:bg-muted" style={{ color: activeCategory === cat.id ? "var(--primary)" : "var(--foreground)", background: activeCategory === cat.id ? "var(--accent)" : "transparent" }}>
+              <button key={cat.id} onClick={() => { setActiveCategory(cat.id); setShowProjectFiles(false); }} className="w-full text-left px-2 py-1.5 rounded-lg flex items-center justify-between text-xs transition-colors hover:bg-muted" style={{ color: activeCategory === cat.id ? "var(--primary)" : "var(--foreground)", background: activeCategory === cat.id ? "var(--accent)" : "transparent" }}>
                 <span className="flex items-center gap-1.5 min-w-0"><span>{cat.icon}</span><span className="truncate">{cat.label}</span></span>
                 <span className="text-xs flex-shrink-0" style={{ color: "var(--muted-foreground)" }}>{articles.filter(a => a.cat === cat.id).length}</span>
               </button>
             ))}
+            <button onClick={openProjectFiles} className="w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-1.5 text-xs transition-colors hover:bg-muted" style={{ color: showProjectFiles ? "var(--primary)" : "var(--foreground)", background: showProjectFiles ? "var(--accent)" : "transparent" }}>
+              <span>📁</span><span className="truncate">Arquivos de Projetos</span>
+            </button>
           </div>
           {/* Recent */}
           <div>
             <div className="text-xs font-semibold px-2 py-1 mb-1" style={{ color: "var(--muted-foreground)" }}>RECENTES</div>
             {recent.map(a => (
-              <button key={a.id} onClick={() => { setSelectedArticle(a); setConfirmDelete(false); }} className="w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2 text-xs transition-colors hover:bg-muted" style={{ color: "var(--foreground)" }}>
+              <button key={a.id} onClick={() => { setSelectedArticle(a); setConfirmDelete(false); setShowProjectFiles(false); }} className="w-full text-left px-2 py-1.5 rounded-lg flex items-center gap-2 text-xs transition-colors hover:bg-muted" style={{ color: "var(--foreground)" }}>
                 <Clock size={11} style={{ color: "var(--muted-foreground)", flexShrink: 0 }} />
                 <span className="truncate">{a.title}</span>
               </button>
@@ -311,10 +337,11 @@ export function Knowledge() {
       </div>
 
       {/* Article list */}
+      {!showProjectFiles && (
       <div className="w-56 flex-shrink-0 border-r overflow-y-auto" style={{ borderColor: "var(--border)", background: "var(--muted)", scrollbarWidth: "none" }}>
         <div className="p-3 space-y-1">
           {filtered.map(a => (
-            <button key={a.id} onClick={() => { setSelectedArticle(a); setConfirmDelete(false); }}
+            <button key={a.id} onClick={() => { setSelectedArticle(a); setConfirmDelete(false); setShowProjectFiles(false); }}
               className="w-full text-left p-3 rounded-lg transition-all"
               style={{ background: selectedArticle?.id === a.id ? "var(--card)" : "transparent", borderLeft: selectedArticle?.id === a.id ? `3px solid var(--primary)` : "3px solid transparent" }}>
               <div className="flex items-start justify-between gap-2 mb-1">
@@ -330,10 +357,51 @@ export function Knowledge() {
           )}
         </div>
       </div>
+      )}
 
       {/* Article content */}
       <div className="flex-1 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
-        {selectedArticle ? (
+        {showProjectFiles ? (
+          <div className="max-w-3xl mx-auto p-8">
+            <h2 className="text-2xl font-bold mb-1" style={{ color: "var(--foreground)" }}>📁 Arquivos de Projetos</h2>
+            <p className="text-xs mb-6" style={{ color: "var(--muted-foreground)" }}>
+              Puxado direto dos projetos — envie ou remova arquivos lá em Projetos que atualiza aqui automaticamente.
+            </p>
+            {projectFilesLoading && (
+              <div className="text-xs flex items-center gap-2" style={{ color: "var(--muted-foreground)" }}><Loader2 size={12} className="animate-spin" />Carregando...</div>
+            )}
+            {!projectFilesLoading && projectFiles.length === 0 && (
+              <div className="text-sm text-center py-16" style={{ color: "var(--muted-foreground)" }}>Nenhum arquivo de projeto ainda.</div>
+            )}
+            {Object.entries(
+              projectFiles.reduce((acc, f) => {
+                (acc[f.project_name] ??= []).push(f);
+                return acc;
+              }, {} as Record<string, AllProjectFile[]>)
+            ).map(([projName, files]) => (
+              <div key={projName} className="mb-6">
+                <div className="flex items-center gap-2 mb-2">
+                  <h3 className="text-sm font-bold" style={{ color: "var(--foreground)" }}>{projName}</h3>
+                  {files[0].project_client && (
+                    <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: "var(--muted)", color: "var(--muted-foreground)" }}>{files[0].project_client}</span>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  {files.map((f) => (
+                    <div key={f.id} className="flex items-center gap-3 p-3 rounded-xl border" style={{ borderColor: "var(--border)" }}>
+                      <Paperclip size={14} style={{ color: "var(--muted-foreground)" }} className="flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium truncate" style={{ color: "var(--foreground)" }}>{f.name}</div>
+                        <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>{fmtProjectFileBytes(f.size_bytes)} · {f.uploaded_by} · {new Date(f.created_at).toLocaleDateString("pt-BR")}</div>
+                      </div>
+                      <a href={f.url} target="_blank" rel="noreferrer" className="flex-shrink-0" style={{ color: "var(--primary)" }}><Download size={14} /></a>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : selectedArticle ? (
           <div className="max-w-3xl mx-auto p-8">
             <div className="mb-6">
               <div className="flex items-center justify-between mb-3">

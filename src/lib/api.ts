@@ -236,7 +236,24 @@ export interface ContentPost {
   hashtags: string[];
 }
 
-// --- Genérico: listar e criar num recurso do endpoint consolidado /api/resources/[type] ---
+export interface AllProjectFile {
+  id: number;
+  project_id: number;
+  project_name: string;
+  project_client: string | null;
+  name: string;
+  url: string;
+  path: string;
+  size_bytes: number | null;
+  content_type: string | null;
+  uploaded_by: string | null;
+  created_at: string;
+}
+
+export async function fetchAllProjectFiles(): Promise<AllProjectFile[]> {
+  const res = await fetch("/api/resources/project-files-all", { headers: await authHeaders() });
+  return handleResponse(res);
+}
 function makeResource<T = any>(type: string) {
   return {
     async list(): Promise<T[]> {

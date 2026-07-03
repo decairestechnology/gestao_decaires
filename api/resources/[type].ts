@@ -417,6 +417,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(405).json({ error: "Método não permitido" });
     }
 
+    case "project-files-all": {
+      if (req.method !== "GET") {
+        res.setHeader("Allow", "GET");
+        return res.status(405).json({ error: "Método não permitido" });
+      }
+      const rows = await sql`
+        SELECT f.id, f.project_id, p.name AS project_name, p.client AS project_client,
+               f.name, f.url, f.path, f.size_bytes, f.content_type, f.uploaded_by, f.created_at
+        FROM project_files f
+        JOIN projects p ON p.id = f.project_id
+        ORDER BY p.name ASC, f.created_at DESC
+      `;
+      return res.status(200).json(rows);
+    }
+
     default:
       return res.status(404).json({ error: `Recurso "${type}" não existe` });
   }
