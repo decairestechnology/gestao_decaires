@@ -1,6 +1,10 @@
-import { Download, FileSpreadsheet, BarChart3, Users, TrendingUp, FolderKanban, Target, FileText, Globe } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { Download, FileSpreadsheet, BarChart3, Users, TrendingUp, FolderKanban, Target, FileText, Globe, Loader2 } from "lucide-react";
 import { BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { fetchDashboard, contentApi, platformsApi } from "../../lib/api";
 
+// Tendência mensal ainda é ilustrativa — mesma lógica das outras telas: vira real
+// quando houver histórico acumulado suficiente no banco.
 const monthlyRevenue = [
   { month: "Jan", receita: 18500, despesa: 11200, lucro: 7300 },
   { month: "Fev", receita: 22000, despesa: 13500, lucro: 8500 },
@@ -10,42 +14,80 @@ const monthlyRevenue = [
   { month: "Jun", receita: 27500, despesa: 13000, lucro: 14500 },
 ];
 
-const leadConversion = [
-  { stage: "Leads", value: 48 },
-  { stage: "Contato", value: 32 },
-  { stage: "Qualif.", value: 21 },
-  { stage: "Proposta", value: 14 },
-  { stage: "Fechados", value: 5 },
-];
-
-const projectsByStatus = [
-  { name: "Em andamento", value: 8 },
-  { name: "Concluído", value: 12 },
-  { name: "Planejamento", value: 3 },
-  { name: "Atrasado", value: 2 },
-  { name: "Pausado", value: 1 },
-];
 const statusChartColors = ["#06B6D4", "#10B981", "#7C3AED", "#EF4444", "#F59E0B"];
-
-const contentByPlatform = [
-  { platform: "Instagram", publicados: 24, planejados: 8 },
-  { platform: "LinkedIn", publicados: 18, planejados: 6 },
-  { platform: "YouTube", publicados: 12, planejados: 4 },
-  { platform: "E-mail", publicados: 8, planejados: 2 },
-];
-
-const reportCards = [
-  { label: "Projetos", icon: FolderKanban, color: "#06B6D4", stats: [["Total", "26"], ["Concluídos", "12"], ["Atrasados", "2"]] },
-  { label: "Leads e Vendas", icon: Users, color: "#7C3AED", stats: [["Leads totais", "48"], ["Convertidos", "5"], ["Taxa", "10.4%"]] },
-  { label: "Financeiro", icon: TrendingUp, color: "#10B981", stats: [["Receita total", "R$ 148k"], ["Despesas", "R$ 79.7k"], ["Lucro", "R$ 68.3k"]] },
-  { label: "Metas", icon: Target, color: "#F59E0B", stats: [["Total", "6"], ["Em andamento", "6"], ["Progresso médio", "58%"]] },
-  { label: "Conteúdo", icon: FileText, color: "#EF4444", stats: [["Publicados", "62"], ["Engajamento", "+24%"], ["Alcance", "18.5k"]] },
-  { label: "Plataformas", icon: Globe, color: "#8B5CF6", stats: [["Ativas", "4"], ["Usuários", "554"], ["MRR", "R$ 13.5k"]] },
-];
+const statusColorMap: Record<string, string> = {
+  "Em andamento": "#06B6D4", Concluído: "#10B981", Planejamento: "#7C3AED", Atrasado: "#EF4444", Pausado: "#F59E0B", "Em revisão": "#F59E0B",
+};
+const stageLabels: Record<string, string> = { new: "Leads", contact: "Contato", qualify: "Qualif.", proposal: "Proposta", negotiation: "Negociação", won: "Fechados" };
+const stageOrder = ["new", "contact", "qualify", "proposal", "negotiation", "won"];
 
 export function Reports() {
+  const [data, setData] = useState<any>(null);
+  const [contentStats, setContentStats] = useState<{ platform: string; publicados: number; planejados: number }[]>([]);
+  const [platformStats, setPlatformStats] = useState({ ativas: 0, usuarios: 0, mrr: 0 });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [dash, content, platforms] = await Promise.all([
+        fetchDashboard(),
+        contentApi.list(),
+        platformsApi.list(),
+      ]);
+      setData(dash);
+
+      const byPlatform = new Map<string, { publicados: number; planejados: number }>();
+      for (const c of content) {
+        const key = c.platform ?? "Outro";
+        const entry = byPlatform.get(key) ?? { publicados: 0, planejados: 0 };
+        if (c.status === "Publicado") entry.publicados++; else entry.planejados++;
+        byPlatform.set(key, entry);
+      }
+      setContentStats(Array.from(byPlatform.entries()).map(([platform, v]) => ({ platform, ...v })));
+
+      const ativas = platforms.filter((p: any) => p.status === "Produção" || p.status === "Manutenção").length;
+      const usuarios = platforms.reduce((a: number, p: any) => a + (p.users_count ?? 0), 0);
+      const mrr = platforms.reduce((a: number, p: any) => a + (Number(p.revenue) || 0), 0);
+      setPlatformStats({ ativas, usuarios, mrr });
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível carregar os relatórios.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const projectsByStatus = (data?.projectStatusRows ?? []).map((r: any) => ({ name: r.status, value: r.total }));
+  const funnelMap = new Map((data?.funnelRows ?? []).map((r: any) => [r.stage, r.total]));
+  const leadConversion = stageOrder.map((s) => ({ stage: stageLabels[s], value: funnelMap.get(s) ?? 0 }));
+
+  const reportCards = data ? [
+    { label: "Projetos", icon: FolderKanban, color: "#06B6D4", stats: [["Total", String(data.projects.total)], ["Concluídos", String(data.projects.concluidos)], ["Atrasados", String(data.projects.atrasados)]] },
+    { label: "Leads e Vendas", icon: Users, color: "#7C3AED", stats: [["Leads totais", String(data.leads.total)], ["Convertidos", String(data.leads.ganhos)], ["Em negociação", String(data.leads.negociacao)]] },
+    { label: "Financeiro (mês)", icon: TrendingUp, color: "#10B981", stats: [["Receita", `R$ ${data.financial.receita.toLocaleString("pt-BR")}`], ["Despesas", `R$ ${data.financial.despesa.toLocaleString("pt-BR")}`], ["Saldo", `R$ ${(data.financial.receita - data.financial.despesa).toLocaleString("pt-BR")}`]] },
+    { label: "Metas", icon: Target, color: "#F59E0B", stats: [["Total", String(data.goals.total)], ["Em andamento", String(data.goals.em_andamento)], ["", ""]] },
+    { label: "Conteúdo", icon: FileText, color: "#EF4444", stats: [["Publicados", String(contentStats.reduce((a, c) => a + c.publicados, 0))], ["Planejados", String(contentStats.reduce((a, c) => a + c.planejados, 0))], ["", ""]] },
+    { label: "Plataformas", icon: Globe, color: "#8B5CF6", stats: [["Ativas", String(platformStats.ativas)], ["Usuários", String(platformStats.usuarios)], ["MRR", `R$ ${platformStats.mrr.toLocaleString("pt-BR")}`]] },
+  ] : [];
+
   return (
     <div className="p-6 overflow-y-auto h-full" style={{ scrollbarWidth: "none" }}>
+      {error && (
+        <div className="mb-4 text-sm rounded-lg px-4 py-2.5" style={{ background: "#FEF2F2", color: "#991B1B" }}>
+          {error}
+        </div>
+      )}
+      {loading && !data && (
+        <div className="flex items-center gap-2 text-sm py-8 justify-center" style={{ color: "var(--muted-foreground)" }}>
+          <Loader2 size={16} className="animate-spin" /> Carregando relatórios...
+        </div>
+      )}
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <select className="text-sm px-3 py-2 rounded-lg border outline-none" style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}>
@@ -146,17 +188,20 @@ export function Reports() {
             <ResponsiveContainer width={160} height={160}>
               <PieChart>
                 <Pie data={projectsByStatus} cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={3} dataKey="value">
-                  {projectsByStatus.map((_, i) => <Cell key={i} fill={statusChartColors[i]} />)}
+                  {projectsByStatus.map((s: any, i: number) => <Cell key={i} fill={statusColorMap[s.name] ?? statusChartColors[i % statusChartColors.length]} />)}
                 </Pie>
               </PieChart>
             </ResponsiveContainer>
             <div className="flex-1 space-y-2">
-              {projectsByStatus.map((s, i) => (
+              {projectsByStatus.map((s: any, i: number) => (
                 <div key={i} className="flex items-center justify-between text-xs">
-                  <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: statusChartColors[i] }} />{s.name}</span>
+                  <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: statusColorMap[s.name] ?? statusChartColors[i % statusChartColors.length] }} />{s.name}</span>
                   <span className="font-bold" style={{ color: "var(--foreground)" }}>{s.value}</span>
                 </div>
               ))}
+              {projectsByStatus.length === 0 && (
+                <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>Nenhum projeto cadastrado</div>
+              )}
             </div>
           </div>
         </div>
@@ -165,7 +210,7 @@ export function Reports() {
         <div className="rounded-xl border p-5 shadow-sm" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
           <div className="font-semibold text-sm mb-4" style={{ color: "var(--foreground)" }}>Conteúdo por Plataforma</div>
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={contentByPlatform}>
+            <BarChart data={contentStats}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="platform" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
