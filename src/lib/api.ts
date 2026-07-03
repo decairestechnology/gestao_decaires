@@ -394,6 +394,13 @@ export const transactionsApi = {
     });
     return handleResponse(res);
   },
+  async remove(id: number) {
+    const res = await fetch(`/api/resources/transactions?id=${id}`, {
+      method: "DELETE",
+      headers: await authHeaders(),
+    });
+    await handleResponse(res);
+  },
 };
 export const eventsApi = makeResource("events");
 export const goalsApi = makeResource("goals");

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, Download, TrendingUp, TrendingDown, Wallet, AlertCircle, X, Loader2 } from "lucide-react";
-import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { Plus, Download, TrendingUp, TrendingDown, Wallet, AlertCircle, X, Loader2, Trash2, BarChart3, LineChart as LineChartIcon } from "lucide-react";
+import { AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { transactionsApi, type Transaction as ApiTransaction } from "../../lib/api";
 
 // Gráficos de fluxo mensal e distribuição de despesas ainda usam dados de exemplo —
@@ -64,6 +64,9 @@ export function Financial() {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [chartType, setChartType] = useState<"bar" | "line">("bar");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const loadTransactions = useCallback(async () => {
     setLoading(true);
@@ -97,6 +100,39 @@ export function Financial() {
     }
   }
 
+  async function handleDeleteTransaction(id: number) {
+    setDeletingId(id);
+    try {
+      await transactionsApi.remove(id);
+      setConfirmDeleteId(null);
+      await loadTransactions();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível excluir o lançamento.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  function handleExportCsv() {
+    const header = ["Data", "Descrição", "Categoria", "Projeto", "Tipo", "Valor", "Status"];
+    const rows = transactions.map((t) => [
+      t.date, t.desc, t.cat, t.project,
+      t.type === "receita" ? "Receita" : "Despesa",
+      t.value.toFixed(2).replace(".", ","),
+      t.status,
+    ]);
+    const csv = [header, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(";"))
+      .join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `financeiro_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   const totalReceita = transactions.filter(t => t.type === "receita").reduce((a, t) => a + t.value, 0);
   const totalDespesa = transactions.filter(t => t.type === "despesa").reduce((a, t) => a + t.value, 0);
   const saldo = totalReceita - totalDespesa;
@@ -118,7 +154,7 @@ export function Financial() {
           {["Este mês", "Último mês", "Este trimestre", "Este ano"].map(p => <option key={p}>{p}</option>)}
         </select>
         <div className="ml-auto flex gap-2">
-          <button className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm border font-medium transition-colors hover:bg-muted" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>
+          <button onClick={handleExportCsv} className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm border font-medium transition-colors hover:bg-muted" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>
             <Download size={14} />Exportar
           </button>
           <button onClick={() => setShowModal("despesa")}
@@ -161,16 +197,47 @@ export function Financial() {
       {/* Charts */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="md:col-span-2 rounded-xl border p-5 shadow-sm" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
-          <div className="font-semibold text-sm mb-4" style={{ color: "var(--foreground)" }}>Fluxo de Caixa Mensal</div>
+          <div className="flex items-center justify-between mb-4">
+            <div className="font-semibold text-sm" style={{ color: "var(--foreground)" }}>Fluxo de Caixa Mensal</div>
+            <div className="flex items-center gap-1 rounded-lg border p-0.5" style={{ borderColor: "var(--border)" }}>
+              <button
+                onClick={() => setChartType("bar")}
+                className="w-6 h-6 rounded-md flex items-center justify-center transition-colors"
+                style={{ background: chartType === "bar" ? "var(--primary)" : "transparent", color: chartType === "bar" ? "white" : "var(--muted-foreground)" }}
+                title="Gráfico de barras"
+              >
+                <BarChart3 size={12} />
+              </button>
+              <button
+                onClick={() => setChartType("line")}
+                className="w-6 h-6 rounded-md flex items-center justify-center transition-colors"
+                style={{ background: chartType === "line" ? "var(--primary)" : "transparent", color: chartType === "line" ? "white" : "var(--muted-foreground)" }}
+                title="Gráfico de linha"
+              >
+                <LineChartIcon size={12} />
+              </button>
+            </div>
+          </div>
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={monthlyData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="month" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
-              <Tooltip formatter={(v: number) => [`R$ ${v.toLocaleString("pt-BR")}`, ""]} contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} />
-              <Bar dataKey="receita" fill="#06B6D4" radius={[4, 4, 0, 0]} name="Receita" />
-              <Bar dataKey="despesa" fill="#EF4444" radius={[4, 4, 0, 0]} name="Despesa" />
-            </BarChart>
+            {chartType === "bar" ? (
+              <BarChart data={monthlyData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+                <Tooltip formatter={(v: number) => [`R$ ${v.toLocaleString("pt-BR")}`, ""]} contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} />
+                <Bar dataKey="receita" fill="#06B6D4" radius={[4, 4, 0, 0]} name="Receita" />
+                <Bar dataKey="despesa" fill="#EF4444" radius={[4, 4, 0, 0]} name="Despesa" />
+              </BarChart>
+            ) : (
+              <LineChart data={monthlyData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: "var(--muted-foreground)" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
+                <Tooltip formatter={(v: number) => [`R$ ${v.toLocaleString("pt-BR")}`, ""]} contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} />
+                <Line type="monotone" dataKey="receita" stroke="#06B6D4" strokeWidth={2} dot={{ r: 3 }} name="Receita" />
+                <Line type="monotone" dataKey="despesa" stroke="#EF4444" strokeWidth={2} dot={{ r: 3 }} name="Despesa" />
+              </LineChart>
+            )}
           </ResponsiveContainer>
         </div>
         <div className="rounded-xl border p-5 shadow-sm" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
@@ -203,7 +270,7 @@ export function Financial() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b" style={{ borderColor: "var(--border)", background: "var(--muted)" }}>
-                {["Data", "Descrição", "Categoria", "Projeto", "Tipo", "Valor", "Status"].map((h) => (
+                {["Data", "Descrição", "Categoria", "Projeto", "Tipo", "Valor", "Status", ""].map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold" style={{ color: "var(--muted-foreground)" }}>{h}</th>
                 ))}
               </tr>
@@ -211,6 +278,7 @@ export function Financial() {
             <tbody>
               {transactions.map((t) => {
                 const s = statusColors[t.status] ?? { bg: "#F1F5F9", text: "#475569" };
+                const confirming = confirmDeleteId === t.id;
                 return (
                   <tr key={t.id} className="border-b last:border-0 hover:bg-muted transition-colors" style={{ borderColor: "var(--border)" }}>
                     <td className="px-4 py-3 text-xs" style={{ color: "var(--muted-foreground)" }}>{t.date}</td>
@@ -227,6 +295,28 @@ export function Financial() {
                     </td>
                     <td className="px-4 py-3">
                       <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: s.bg, color: s.text }}>{t.status}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      {confirming ? (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => handleDeleteTransaction(t.id)}
+                            disabled={deletingId === t.id}
+                            className="text-xs px-2 py-1 rounded-md font-semibold flex items-center gap-1 disabled:opacity-60"
+                            style={{ background: "#EF4444", color: "white" }}
+                          >
+                            {deletingId === t.id && <Loader2 size={10} className="animate-spin" />}
+                            Confirmar
+                          </button>
+                          <button onClick={() => setConfirmDeleteId(null)} className="text-xs px-2 py-1 rounded-md font-medium" style={{ background: "var(--muted)", color: "var(--foreground)" }}>
+                            Cancelar
+                          </button>
+                        </div>
+                      ) : (
+                        <button onClick={() => setConfirmDeleteId(t.id)} title="Excluir" style={{ color: "var(--muted-foreground)" }}>
+                          <Trash2 size={13} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );

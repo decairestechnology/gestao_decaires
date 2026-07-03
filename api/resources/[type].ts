@@ -8,8 +8,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const type = String(req.query.type ?? "");
 
-  if (req.method !== "GET" && req.method !== "POST" && req.method !== "PATCH") {
-    res.setHeader("Allow", "GET, POST, PATCH");
+  if (req.method !== "GET" && req.method !== "POST" && req.method !== "PATCH" && req.method !== "DELETE") {
+    res.setHeader("Allow", "GET, POST, PATCH, DELETE");
     return res.status(405).json({ error: "Método não permitido" });
   }
 
@@ -32,6 +32,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `;
         if (!updated) return res.status(404).json({ error: "Lançamento não encontrado" });
         return res.status(200).json(updated);
+      }
+      if (req.method === "DELETE") {
+        const txId = Number(req.query.id);
+        if (!txId) return res.status(400).json({ error: "id é obrigatório" });
+        await sql`DELETE FROM financial_transactions WHERE id = ${txId}`;
+        return res.status(204).end();
       }
       const { description, category, client, type: txType, value, payment_method, date, project_id, status: txStatus } = req.body ?? {};
       if (!description || !txType || value === undefined) {
