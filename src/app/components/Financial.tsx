@@ -1,30 +1,15 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Plus, Download, TrendingUp, TrendingDown, Wallet, AlertCircle, X, Loader2, Trash2, BarChart3, LineChart as LineChartIcon } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { transactionsApi, type Transaction as ApiTransaction } from "../../lib/api";
 
-// Gráficos de fluxo mensal e distribuição de despesas ainda usam dados de exemplo —
-// vão virar consultas agregadas reais numa próxima etapa, quando houver histórico suficiente.
-const monthlyData = [
-  { month: "Jan", receita: 18500, despesa: 11200 },
-  { month: "Fev", receita: 22000, despesa: 13500 },
-  { month: "Mar", receita: 19800, despesa: 12000 },
-  { month: "Abr", receita: 28500, despesa: 14200 },
-  { month: "Mai", receita: 32000, despesa: 15800 },
-  { month: "Jun", receita: 27500, despesa: 13000 },
-];
-
-const expenseTypes = [
-  { name: "Pessoal", value: 38, color: "#7C3AED" },
-  { name: "Infraestrutura", value: 22, color: "#06B6D4" },
-  { name: "Marketing", value: 15, color: "#F59E0B" },
-  { name: "Ferramentas", value: 12, color: "#10B981" },
-  { name: "Outros", value: 13, color: "#94A3B8" },
-];
+const EXPENSE_COLORS = ["#7C3AED", "#06B6D4", "#F59E0B", "#10B981", "#EF4444", "#8B5CF6", "#94A3B8"];
+const MONTH_LABELS = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 
 interface UiTransaction {
   id: number;
   date: string;
+  rawDate: string;
   desc: string;
   cat: string;
   project: string;
@@ -38,6 +23,7 @@ function toUiTransaction(t: ApiTransaction): UiTransaction {
   return {
     id: t.id,
     date: t.date ? new Date(t.date).toLocaleDateString("pt-BR") : "—",
+    rawDate: t.date,
     desc: t.description,
     cat: t.category ?? "—",
     project: t.client ?? "—",
@@ -133,9 +119,51 @@ export function Financial() {
     URL.revokeObjectURL(url);
   }
 
-  const totalReceita = transactions.filter(t => t.type === "receita").reduce((a, t) => a + t.value, 0);
-  const totalDespesa = transactions.filter(t => t.type === "despesa").reduce((a, t) => a + t.value, 0);
-  const saldo = totalReceita - totalDespesa;
+  const monthlyData = useMemo(() => {
+    const now = new Date();
+    const months: { key: string; month: string; receita: number; despesa: number }[] = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      months.push({ key: `${d.getFullYear()}-${d.getMonth()}`, month: MONTH_LABELS[d.getMonth()], receita: 0, despesa: 0 });
+    }
+    for (const t of transactions) {
+      if (!t.rawDate) continue;
+      const d = new Date(t.rawDate + "T00:00:00");
+      const key = `${d.getFullYear()}-${d.getMonth()}`;
+      const bucket = months.find((m) => m.key === key);
+      if (!bucket) continue;
+      if (t.type === "receita") bucket.receita += t.value;
+      else bucket.despesa += t.value;
+    }
+    return months;
+  }, [transactions]);
+
+  const expenseTypes = useMemo(() => {
+    const byCategory = new Map<string, number>();
+    let total = 0;
+    for (const t of transactions) {
+      if (t.type !== "despesa") continue;
+      const cat = t.cat && t.cat !== "—" ? t.cat : "Outros";
+      byCategory.set(cat, (byCategory.get(cat) ?? 0) + t.value);
+      total += t.value;
+    }
+    if (total === 0) return [];
+    return Array.from(byCategory.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, value], i) => ({ name, value: Math.round((value / total) * 100), color: EXPENSE_COLORS[i % EXPENSE_COLORS.length] }));
+  }, [transactions]);
+
+  const now = new Date();
+  const isThisMonth = (t: UiTransaction) => {
+    if (!t.rawDate) return false;
+    const d = new Date(t.rawDate + "T00:00:00");
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  };
+  const totalReceita = transactions.filter(t => t.type === "receita" && isThisMonth(t)).reduce((a, t) => a + t.value, 0);
+  const totalDespesa = transactions.filter(t => t.type === "despesa" && isThisMonth(t)).reduce((a, t) => a + t.value, 0);
+  const totalReceitaGeral = transactions.filter(t => t.type === "receita").reduce((a, t) => a + t.value, 0);
+  const totalDespesaGeral = transactions.filter(t => t.type === "despesa").reduce((a, t) => a + t.value, 0);
+  const saldo = totalReceitaGeral - totalDespesaGeral;
   const aReceber = transactions.filter(t => t.status === "A receber").reduce((a, t) => a + t.value, 0);
   const aPagar = transactions.filter(t => t.status === "Pendente").reduce((a, t) => a + t.value, 0);
 
@@ -174,8 +202,8 @@ export function Financial() {
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
         {[
           { label: "Saldo atual", value: `R$ ${saldo.toLocaleString("pt-BR")}`, icon: Wallet, color: "#06B6D4", bg: "#E0F9FF" },
-          { label: "Receitas (Jun)", value: `R$ ${totalReceita.toLocaleString("pt-BR")}`, icon: TrendingUp, color: "#10B981", bg: "#ECFDF5" },
-          { label: "Despesas (Jun)", value: `R$ ${totalDespesa.toLocaleString("pt-BR")}`, icon: TrendingDown, color: "#EF4444", bg: "#FEF2F2" },
+          { label: `Receitas (${MONTH_LABELS[new Date().getMonth()]})`, value: `R$ ${totalReceita.toLocaleString("pt-BR")}`, icon: TrendingUp, color: "#10B981", bg: "#ECFDF5" },
+          { label: `Despesas (${MONTH_LABELS[new Date().getMonth()]})`, value: `R$ ${totalDespesa.toLocaleString("pt-BR")}`, icon: TrendingDown, color: "#EF4444", bg: "#FEF2F2" },
           { label: "A receber", value: `R$ ${aReceber.toLocaleString("pt-BR")}`, icon: AlertCircle, color: "#7C3AED", bg: "#F5F3FF" },
           { label: "A pagar", value: `R$ ${aPagar.toLocaleString("pt-BR")}`, icon: AlertCircle, color: "#F59E0B", bg: "#FFFBEB" },
         ].map((k, i) => {
@@ -242,22 +270,30 @@ export function Financial() {
         </div>
         <div className="rounded-xl border p-5 shadow-sm" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
           <div className="font-semibold text-sm mb-4" style={{ color: "var(--foreground)" }}>Distribuição Despesas</div>
-          <ResponsiveContainer width="100%" height={130}>
-            <PieChart>
-              <Pie data={expenseTypes} cx="50%" cy="50%" innerRadius={35} outerRadius={60} paddingAngle={3} dataKey="value">
-                {expenseTypes.map((e, i) => <Cell key={i} fill={e.color} />)}
-              </Pie>
-              <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} />
-            </PieChart>
-          </ResponsiveContainer>
-          <div className="space-y-1.5 mt-2">
-            {expenseTypes.map((e, i) => (
-              <div key={i} className="flex items-center justify-between text-xs">
-                <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: e.color }} /><span style={{ color: "var(--muted-foreground)" }}>{e.name}</span></span>
-                <span className="font-semibold" style={{ color: "var(--foreground)" }}>{e.value}%</span>
+          {expenseTypes.length > 0 ? (
+            <>
+              <ResponsiveContainer width="100%" height={130}>
+                <PieChart>
+                  <Pie data={expenseTypes} cx="50%" cy="50%" innerRadius={35} outerRadius={60} paddingAngle={3} dataKey="value">
+                    {expenseTypes.map((e, i) => <Cell key={i} fill={e.color} />)}
+                  </Pie>
+                  <Tooltip contentStyle={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} />
+                </PieChart>
+              </ResponsiveContainer>
+              <div className="space-y-1.5 mt-2">
+                {expenseTypes.map((e, i) => (
+                  <div key={i} className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-1.5"><span className="w-2 h-2 rounded-full" style={{ background: e.color }} /><span style={{ color: "var(--muted-foreground)" }}>{e.name}</span></span>
+                    <span className="font-semibold" style={{ color: "var(--foreground)" }}>{e.value}%</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          ) : (
+            <div className="flex items-center justify-center py-10 text-xs text-center" style={{ color: "var(--muted-foreground)" }}>
+              Nenhuma despesa com categoria registrada ainda.
+            </div>
+          )}
         </div>
       </div>
 
