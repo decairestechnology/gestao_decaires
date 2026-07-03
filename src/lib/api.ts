@@ -285,6 +285,14 @@ export const ideasApi = {
     });
     return handleResponse(res);
   },
+  async updateStatus(id: number, status: string) {
+    const res = await fetch(`/api/ideas/${id}`, {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ status }),
+    });
+    return handleResponse(res);
+  },
   async cancel(id: number, reason?: string) {
     const res = await fetch(`/api/ideas/${id}`, {
       method: "PATCH",

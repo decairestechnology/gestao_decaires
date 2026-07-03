@@ -99,11 +99,17 @@ export function Ideas() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [converting, setConverting] = useState(false);
-  const [savingScore, setSavingScore] = useState<string | null>(null);
+  const [scoreDraft, setScoreDraft] = useState<UiIdea["scores"] | null>(null);
+  const [savingScores, setSavingScores] = useState(false);
+  const [changingStatus, setChangingStatus] = useState(false);
   const [showCancelBox, setShowCancelBox] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [reactivating, setReactivating] = useState(false);
+
+  useEffect(() => {
+    setScoreDraft(selected ? { ...selected.scores } : null);
+  }, [selected?.id]);
 
   const loadIdeas = useCallback(async () => {
     setLoading(true);
@@ -218,16 +224,40 @@ export function Ideas() {
     }
   }
 
-  async function handleScoreChange(field: string, value: number) {
-    if (!selected) return;
-    setSavingScore(field);
+  function handleScoreDraftChange(field: keyof UiIdea["scores"], value: number) {
+    setScoreDraft((prev) => (prev ? { ...prev, [field]: value } : prev));
+  }
+
+  async function handleSaveScores() {
+    if (!selected || !scoreDraft) return;
+    setSavingScores(true);
     try {
-      const updated = await ideasApi.update(selected.id, { [field]: value } as any);
+      const updated = await ideasApi.update(selected.id, {
+        score_viability: scoreDraft.viabilidade,
+        score_commercial: scoreDraft.comercial,
+        score_innovation: scoreDraft.inovacao,
+        score_cost: scoreDraft.custo,
+        score_time: scoreDraft.tempo,
+      } as any);
       setSelected(toUiIdea(updated));
     } catch (err: any) {
       setError(err?.message ?? "Não foi possível salvar a avaliação.");
     } finally {
-      setSavingScore(null);
+      setSavingScores(false);
+    }
+  }
+
+  async function handleChangeStatus(status: string) {
+    if (!selected) return;
+    setChangingStatus(true);
+    try {
+      const updated = await ideasApi.updateStatus(selected.id, status);
+      setSelected(toUiIdea(updated));
+      await loadIdeas();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível mudar o status.");
+    } finally {
+      setChangingStatus(false);
     }
   }
 
@@ -338,14 +368,55 @@ export function Ideas() {
                   </div>
                 ))}
               </div>
+              <div>
+                <div className="font-semibold text-sm mb-2" style={{ color: "var(--foreground)" }}>Status no fluxo</div>
+                <div className="flex flex-wrap gap-2">
+                  {["Nova", "Em análise", "Validando", "Aprovada", "Arquivada"].map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => handleChangeStatus(s)}
+                      disabled={changingStatus || selected.status === s}
+                      className="text-xs px-3 py-1.5 rounded-lg font-semibold disabled:cursor-default transition-opacity"
+                      style={{
+                        background: selected.status === s ? statusColors[s]?.bg : "var(--muted)",
+                        color: selected.status === s ? statusColors[s]?.text : "var(--muted-foreground)",
+                        opacity: changingStatus ? 0.6 : 1,
+                      }}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                {(selected.status === "Cancelada" || selected.status === "Em desenvolvimento") && (
+                  <p className="text-xs mt-2" style={{ color: "var(--muted-foreground)" }}>
+                    {selected.status === "Em desenvolvimento" ? "Essa ideia já virou projeto — o fluxo acima não se aplica mais." : "Reative a ideia (botão abaixo) pra voltar ao fluxo normal."}
+                  </p>
+                )}
+              </div>
+
               <div className="space-y-3">
-                <div className="font-semibold text-sm" style={{ color: "var(--foreground)" }}>Avaliação</div>
-                <p className="text-xs -mt-2" style={{ color: "var(--muted-foreground)" }}>Clique nas barras pra dar a nota.</p>
-                <ScoreBar label="Viabilidade" value={selected.scores.viabilidade} saving={savingScore === "score_viability"} onChange={(v) => handleScoreChange("score_viability", v)} />
-                <ScoreBar label="Potencial comercial" value={selected.scores.comercial} saving={savingScore === "score_commercial"} onChange={(v) => handleScoreChange("score_commercial", v)} />
-                <ScoreBar label="Inovação" value={selected.scores.inovacao} saving={savingScore === "score_innovation"} onChange={(v) => handleScoreChange("score_innovation", v)} />
-                <ScoreBar label="Custo estimado" value={selected.scores.custo} saving={savingScore === "score_cost"} onChange={(v) => handleScoreChange("score_cost", v)} />
-                <ScoreBar label="Tempo de desenvolvimento" value={selected.scores.tempo} saving={savingScore === "score_time"} onChange={(v) => handleScoreChange("score_time", v)} />
+                <div className="flex items-center justify-between">
+                  <div className="font-semibold text-sm" style={{ color: "var(--foreground)" }}>Avaliação</div>
+                  <button
+                    onClick={handleSaveScores}
+                    disabled={savingScores || !scoreDraft || JSON.stringify(scoreDraft) === JSON.stringify(selected.scores)}
+                    className="text-xs px-3 py-1.5 rounded-lg font-semibold disabled:opacity-40 flex items-center gap-1.5"
+                    style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+                  >
+                    {savingScores && <Loader2 size={11} className="animate-spin" />}
+                    Salvar avaliação
+                  </button>
+                </div>
+                <p className="text-xs -mt-2" style={{ color: "var(--muted-foreground)" }}>Clique nas barras pra ajustar a nota, depois clique em "Salvar avaliação".</p>
+                {scoreDraft && (
+                  <>
+                    <ScoreBar label="Viabilidade" value={scoreDraft.viabilidade} onChange={(v) => handleScoreDraftChange("viabilidade", v)} />
+                    <ScoreBar label="Potencial comercial" value={scoreDraft.comercial} onChange={(v) => handleScoreDraftChange("comercial", v)} />
+                    <ScoreBar label="Inovação" value={scoreDraft.inovacao} onChange={(v) => handleScoreDraftChange("inovacao", v)} />
+                    <ScoreBar label="Custo estimado" value={scoreDraft.custo} onChange={(v) => handleScoreDraftChange("custo", v)} />
+                    <ScoreBar label="Tempo de desenvolvimento" value={scoreDraft.tempo} onChange={(v) => handleScoreDraftChange("tempo", v)} />
+                  </>
+                )}
               </div>
 
               {selected.status === "Cancelada" && selected.cancelReason && (

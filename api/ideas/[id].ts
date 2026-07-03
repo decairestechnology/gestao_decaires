@@ -18,17 +18,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const [updated] = await sql`
         UPDATE ideas SET
           title = COALESCE(${f.title ?? null}, title),
-          description = ${f.description ?? null},
-          category = ${f.category ?? null},
+          description = COALESCE(${f.description ?? null}, description),
+          category = COALESCE(${f.category ?? null}, category),
           priority = COALESCE(${f.priority ?? null}, priority),
-          revenue_potential = ${f.revenue_potential ?? null},
-          complexity = ${f.complexity ?? null},
-          target_audience = ${f.target_audience ?? null},
-          score_viability = ${f.score_viability ?? null},
-          score_commercial = ${f.score_commercial ?? null},
-          score_innovation = ${f.score_innovation ?? null},
-          score_cost = ${f.score_cost ?? null},
-          score_time = ${f.score_time ?? null}
+          revenue_potential = COALESCE(${f.revenue_potential ?? null}, revenue_potential),
+          complexity = COALESCE(${f.complexity ?? null}, complexity),
+          target_audience = COALESCE(${f.target_audience ?? null}, target_audience),
+          score_viability = COALESCE(${f.score_viability ?? null}, score_viability),
+          score_commercial = COALESCE(${f.score_commercial ?? null}, score_commercial),
+          score_innovation = COALESCE(${f.score_innovation ?? null}, score_innovation),
+          score_cost = COALESCE(${f.score_cost ?? null}, score_cost),
+          score_time = COALESCE(${f.score_time ?? null}, score_time)
+        WHERE id = ${id}
+        RETURNING id, title, description, category, author_name, priority, revenue_potential, complexity, target_audience, status, score_viability, score_commercial, score_innovation, score_cost, score_time, project_id, cancel_reason, created_at
+      `;
+      if (!updated) return res.status(404).json({ error: "Ideia não encontrada" });
+      return res.status(200).json(updated);
+    }
+
+    // Mudança direta de status (fluxo: Nova, Em análise, Validando, Aprovada, Arquivada)
+    if (body.status) {
+      const [updated] = await sql`
+        UPDATE ideas SET status = ${body.status}
         WHERE id = ${id}
         RETURNING id, title, description, category, author_name, priority, revenue_potential, complexity, target_audience, status, score_viability, score_commercial, score_innovation, score_cost, score_time, project_id, cancel_reason, created_at
       `;
