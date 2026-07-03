@@ -131,12 +131,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     case "goals": {
+      async function recalcGoalProgress(goalId: number) {
+        const [row] = await sql`SELECT COALESCE(AVG(progress), 0)::int AS avg FROM goal_key_results WHERE goal_id = ${goalId}`;
+        await sql`UPDATE goals SET progress = ${row.avg} WHERE id = ${goalId}`;
+      }
+
+      async function fetchFullGoal(goalId: number) {
+        const [full] = await sql`
+          SELECT g.id, g.title, g.description, g.responsible_name, g.deadline, g.progress,
+                 g.priority, g.status, g.category, g.created_at,
+                 COALESCE(
+                   (SELECT json_agg(json_build_object('id', kr.id, 'description', kr.description, 'progress', kr.progress) ORDER BY kr.id)
+                    FROM goal_key_results kr WHERE kr.goal_id = g.id),
+                   '[]'
+                 ) AS okrs
+          FROM goals g WHERE g.id = ${goalId}
+        `;
+        return full;
+      }
+
       if (req.method === "GET") {
         const rows = await sql`
           SELECT g.id, g.title, g.description, g.responsible_name, g.deadline, g.progress,
                  g.priority, g.status, g.category, g.created_at,
                  COALESCE(
-                   (SELECT json_agg(json_build_object('id', kr.id, 'description', kr.description, 'progress', kr.progress))
+                   (SELECT json_agg(json_build_object('id', kr.id, 'description', kr.description, 'progress', kr.progress) ORDER BY kr.id)
                     FROM goal_key_results kr WHERE kr.goal_id = g.id),
                    '[]'
                  ) AS okrs
@@ -144,6 +163,59 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `;
         return res.status(200).json(rows);
       }
+
+      if (req.method === "PATCH") {
+        const body = req.body ?? {};
+        if (!body.id) return res.status(400).json({ error: "id é obrigatório" });
+        const goalId = body.id;
+
+        if (body.fields) {
+          const f = body.fields;
+          const found = await sql`
+            UPDATE goals SET
+              title = COALESCE(${f.title ?? null}, title),
+              description = ${f.description ?? null},
+              deadline = ${f.deadline ?? null},
+              priority = COALESCE(${f.priority ?? null}, priority),
+              category = ${f.category ?? null},
+              status = COALESCE(${f.status ?? null}, status)
+            WHERE id = ${goalId} RETURNING id
+          `;
+          if (found.length === 0) return res.status(404).json({ error: "Meta não encontrada" });
+          return res.status(200).json(await fetchFullGoal(goalId));
+        }
+
+        if (body.addOkr) {
+          if (!body.addOkr.description) return res.status(400).json({ error: "Descrição do resultado-chave é obrigatória" });
+          await sql`INSERT INTO goal_key_results (goal_id, description, progress) VALUES (${goalId}, ${body.addOkr.description}, 0)`;
+          await recalcGoalProgress(goalId);
+          return res.status(200).json(await fetchFullGoal(goalId));
+        }
+
+        if (body.updateOkr) {
+          const { krId, progress } = body.updateOkr;
+          if (!krId || progress === undefined) return res.status(400).json({ error: "krId e progress são obrigatórios" });
+          await sql`UPDATE goal_key_results SET progress = ${progress} WHERE id = ${krId} AND goal_id = ${goalId}`;
+          await recalcGoalProgress(goalId);
+          return res.status(200).json(await fetchFullGoal(goalId));
+        }
+
+        if (body.removeOkr) {
+          await sql`DELETE FROM goal_key_results WHERE id = ${body.removeOkr} AND goal_id = ${goalId}`;
+          await recalcGoalProgress(goalId);
+          return res.status(200).json(await fetchFullGoal(goalId));
+        }
+
+        return res.status(400).json({ error: "Nada para atualizar" });
+      }
+
+      if (req.method === "DELETE") {
+        const goalId = Number(req.query.id);
+        if (!goalId) return res.status(400).json({ error: "id é obrigatório" });
+        await sql`DELETE FROM goals WHERE id = ${goalId}`;
+        return res.status(204).end();
+      }
+
       const { title, description, deadline, priority, category, okrs } = req.body ?? {};
       if (!title) return res.status(400).json({ error: "Título é obrigatório" });
       const responsibleName = niceName(user);
@@ -159,17 +231,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
       }
-      const [full] = await sql`
-        SELECT g.id, g.title, g.description, g.responsible_name, g.deadline, g.progress,
-               g.priority, g.status, g.category, g.created_at,
-               COALESCE(
-                 (SELECT json_agg(json_build_object('id', kr.id, 'description', kr.description, 'progress', kr.progress))
-                  FROM goal_key_results kr WHERE kr.goal_id = g.id),
-                 '[]'
-               ) AS okrs
-        FROM goals g WHERE g.id = ${goal.id}
-      `;
-      return res.status(201).json(full);
+      return res.status(201).json(await fetchFullGoal(goal.id));
     }
 
     case "ideas": {

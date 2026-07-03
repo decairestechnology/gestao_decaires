@@ -1,18 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Download, FileSpreadsheet, BarChart3, Users, TrendingUp, FolderKanban, Target, FileText, Globe, Loader2 } from "lucide-react";
 import { BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
 import { fetchDashboard, contentApi, platformsApi } from "../../lib/api";
 
-// Tendência mensal ainda é ilustrativa — mesma lógica das outras telas: vira real
-// quando houver histórico acumulado suficiente no banco.
-const monthlyRevenue = [
-  { month: "Jan", receita: 18500, despesa: 11200, lucro: 7300 },
-  { month: "Fev", receita: 22000, despesa: 13500, lucro: 8500 },
-  { month: "Mar", receita: 19800, despesa: 12000, lucro: 7800 },
-  { month: "Abr", receita: 28500, despesa: 14200, lucro: 14300 },
-  { month: "Mai", receita: 32000, despesa: 15800, lucro: 16200 },
-  { month: "Jun", receita: 27500, despesa: 13000, lucro: 14500 },
-];
+const MONTH_LABELS = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+const PERIOD_MONTHS: Record<string, number> = { "Este mês": 1, "Este trimestre": 3, "Este semestre": 6, "Este ano": 12 };
 
 const statusChartColors = ["#06B6D4", "#10B981", "#7C3AED", "#EF4444", "#F59E0B"];
 const statusColorMap: Record<string, string> = {
@@ -27,6 +19,7 @@ export function Reports() {
   const [platformStats, setPlatformStats] = useState({ ativas: 0, usuarios: 0, mrr: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [period, setPeriod] = useState("Este semestre");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -67,6 +60,26 @@ export function Reports() {
   const funnelMap = new Map((data?.funnelRows ?? []).map((r: any) => [r.stage, r.total]));
   const leadConversion = stageOrder.map((s) => ({ stage: stageLabels[s], value: funnelMap.get(s) ?? 0 }));
 
+  const monthlyRevenue = useMemo(() => {
+    const rows: { month: string; receita: number; despesa: number }[] = data?.monthlyFinancialRows ?? [];
+    const monthsToShow = PERIOD_MONTHS[period] ?? 6;
+    const map = new Map(rows.map((r) => [r.month, r]));
+    const now = new Date();
+    const result = [];
+    for (let i = monthsToShow - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const row = map.get(key);
+      result.push({
+        month: MONTH_LABELS[d.getMonth()],
+        receita: row?.receita ?? 0,
+        despesa: row?.despesa ?? 0,
+        lucro: (row?.receita ?? 0) - (row?.despesa ?? 0),
+      });
+    }
+    return result;
+  }, [data, period]);
+
   const reportCards = data ? [
     { label: "Projetos", icon: FolderKanban, color: "#06B6D4", stats: [["Total", String(data.projects.total)], ["Concluídos", String(data.projects.concluidos)], ["Atrasados", String(data.projects.atrasados)]] },
     { label: "Leads e Vendas", icon: Users, color: "#7C3AED", stats: [["Leads totais", String(data.leads.total)], ["Convertidos", String(data.leads.ganhos)], ["Em negociação", String(data.leads.negociacao)]] },
@@ -75,6 +88,32 @@ export function Reports() {
     { label: "Conteúdo", icon: FileText, color: "#EF4444", stats: [["Publicados", String(contentStats.reduce((a, c) => a + c.publicados, 0))], ["Planejados", String(contentStats.reduce((a, c) => a + c.planejados, 0))], ["", ""]] },
     { label: "Plataformas", icon: Globe, color: "#8B5CF6", stats: [["Ativas", String(platformStats.ativas)], ["Usuários", String(platformStats.usuarios)], ["MRR", `R$ ${platformStats.mrr.toLocaleString("pt-BR")}`]] },
   ] : [];
+
+  function handleExportExcel() {
+    const rows: string[][] = [["Relatório", "Métrica", "Valor"]];
+    for (const card of reportCards) {
+      for (const [k, v] of card.stats) {
+        if (k) rows.push([card.label, k, v]);
+      }
+    }
+    rows.push([]);
+    rows.push(["Fluxo mensal", "Mês", "Receita", "Despesa", "Lucro"] as any);
+    for (const m of monthlyRevenue) {
+      rows.push(["", m.month, String(m.receita), String(m.despesa), String(m.lucro)]);
+    }
+    const csv = rows.map((row) => row.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(";")).join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `relatorio_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function handleExportPdf() {
+    window.print();
+  }
 
   return (
     <div className="p-6 overflow-y-auto h-full" style={{ scrollbarWidth: "none" }}>
@@ -90,23 +129,14 @@ export function Reports() {
       )}
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
-        <select className="text-sm px-3 py-2 rounded-lg border outline-none" style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}>
-          <option>Este semestre</option>
-          <option>Este trimestre</option>
-          <option>Este mês</option>
-          <option>Este ano</option>
-        </select>
-        <select className="text-sm px-3 py-2 rounded-lg border outline-none" style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}>
-          <option>Todos os setores</option>
-          <option>Comercial</option>
-          <option>Financeiro</option>
-          <option>Desenvolvimento</option>
+        <select value={period} onChange={(e) => setPeriod(e.target.value)} className="text-sm px-3 py-2 rounded-lg border outline-none" style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}>
+          {Object.keys(PERIOD_MONTHS).map((p) => <option key={p}>{p}</option>)}
         </select>
         <div className="ml-auto flex gap-2">
-          <button className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm border font-medium transition-colors hover:bg-muted" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>
+          <button onClick={handleExportExcel} className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm border font-medium transition-colors hover:bg-muted" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>
             <FileSpreadsheet size={14} />Excel
           </button>
-          <button className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition hover:opacity-90" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>
+          <button onClick={handleExportPdf} className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition hover:opacity-90" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>
             <Download size={14} />PDF
           </button>
         </div>

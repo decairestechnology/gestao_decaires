@@ -67,12 +67,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     WHERE date >= CURRENT_DATE ORDER BY date ASC, start_time ASC LIMIT 5
   `;
 
+  // Últimos 12 meses de receita/despesa, pra alimentar gráficos de tendência real
+  const monthlyFinancialRows = await sql`
+    SELECT to_char(date_trunc('month', date), 'YYYY-MM') AS month,
+           COALESCE(SUM(value) FILTER (WHERE type = 'receita'), 0)::float AS receita,
+           COALESCE(SUM(value) FILTER (WHERE type = 'despesa'), 0)::float AS despesa
+    FROM financial_transactions
+    WHERE date >= date_trunc('month', CURRENT_DATE) - INTERVAL '11 months'
+    GROUP BY 1 ORDER BY 1 ASC
+  `;
+
   return res.status(200).json({
     projects: projectStats,
     projectStatusRows,
     leads: leadStats,
     funnelRows,
     financial: financialStats,
+    monthlyFinancialRows,
     goals: goalStats,
     events: eventStats,
     recentProjects,
