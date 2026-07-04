@@ -609,19 +609,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     case "company-settings": {
       if (req.method === "GET") {
-        const [row] = await sql`SELECT name, cnpj, sector, email, website, address FROM company_settings WHERE id = 1`;
-        return res.status(200).json(row ?? { name: "", cnpj: "", sector: "", email: "", website: "", address: "" });
+        const [row] = await sql`SELECT name, cnpj, sector, email, website, address, logo_url FROM company_settings WHERE id = 1`;
+        return res.status(200).json(row ?? { name: "", cnpj: "", sector: "", email: "", website: "", address: "", logo_url: "" });
       }
       if (req.method === "PATCH") {
-        const { name, cnpj, sector, email, website, address } = req.body ?? {};
+        const { name, cnpj, sector, email, website, address, logo_url } = req.body ?? {};
         await sql`
-          INSERT INTO company_settings (id, name, cnpj, sector, email, website, address, updated_at)
-          VALUES (1, ${name ?? null}, ${cnpj ?? null}, ${sector ?? null}, ${email ?? null}, ${website ?? null}, ${address ?? null}, now())
+          INSERT INTO company_settings (id, name, cnpj, sector, email, website, address, logo_url, updated_at)
+          VALUES (1, ${name ?? null}, ${cnpj ?? null}, ${sector ?? null}, ${email ?? null}, ${website ?? null}, ${address ?? null}, ${logo_url ?? null}, now())
           ON CONFLICT (id) DO UPDATE SET
             name = ${name ?? null}, cnpj = ${cnpj ?? null}, sector = ${sector ?? null},
-            email = ${email ?? null}, website = ${website ?? null}, address = ${address ?? null}, updated_at = now()
+            email = ${email ?? null}, website = ${website ?? null}, address = ${address ?? null},
+            logo_url = COALESCE(${logo_url ?? null}, company_settings.logo_url), updated_at = now()
         `;
-        const [row] = await sql`SELECT name, cnpj, sector, email, website, address FROM company_settings WHERE id = 1`;
+        const [row] = await sql`SELECT name, cnpj, sector, email, website, address, logo_url FROM company_settings WHERE id = 1`;
         return res.status(200).json(row);
       }
       res.setHeader("Allow", "GET, PATCH");
@@ -676,6 +677,71 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         goals: goalDeadlines,
         content: contentDeadlines,
       });
+    }
+
+    case "global-search": {
+      if (req.method !== "GET") {
+        res.setHeader("Allow", "GET");
+        return res.status(405).json({ error: "Método não permitido" });
+      }
+      const q = String(req.query.q ?? "").trim();
+      if (q.length < 2) return res.status(200).json([]);
+      const like = `%${q}%`;
+
+      const [projects, leads, ideas, content, platforms, articles] = await Promise.all([
+        sql`SELECT id, name AS title, client AS subtitle FROM projects WHERE name ILIKE ${like} LIMIT 5`,
+        sql`SELECT id, name AS title, company AS subtitle FROM crm_leads WHERE name ILIKE ${like} OR company ILIKE ${like} LIMIT 5`,
+        sql`SELECT id, title, category AS subtitle FROM ideas WHERE title ILIKE ${like} LIMIT 5`,
+        sql`SELECT id, title, platform AS subtitle FROM content_posts WHERE title ILIKE ${like} LIMIT 5`,
+        sql`SELECT id, name AS title, category AS subtitle FROM platforms WHERE name ILIKE ${like} LIMIT 5`,
+        sql`SELECT id, title, author_name AS subtitle FROM knowledge_articles WHERE title ILIKE ${like} LIMIT 5`,
+      ]);
+
+      const mk = (rows: any[], page: string, icon: string) => rows.map((r) => ({ id: r.id, title: r.title, subtitle: r.subtitle ?? "", page, icon }));
+
+      return res.status(200).json([
+        ...mk(projects, "projects", "📁"),
+        ...mk(leads, "crm", "👤"),
+        ...mk(ideas, "ideas", "💡"),
+        ...mk(content, "content", "📝"),
+        ...mk(platforms, "platforms", "🌐"),
+        ...mk(articles, "knowledge", "📖"),
+      ]);
+    }
+
+    case "notifications": {
+      if (req.method !== "GET") {
+        res.setHeader("Allow", "GET");
+        return res.status(405).json({ error: "Método não permitido" });
+      }
+      const overdueProjects = await sql`
+        SELECT id, name, deadline FROM projects
+        WHERE deadline IS NOT NULL AND deadline < CURRENT_DATE AND status NOT IN ('Concluído', 'Cancelado')
+        ORDER BY deadline ASC LIMIT 5
+      `;
+      const soonGoals = await sql`
+        SELECT id, title, deadline FROM goals
+        WHERE deadline IS NOT NULL AND deadline BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days' AND status NOT IN ('Concluída', 'Cancelada')
+        ORDER BY deadline ASC LIMIT 5
+      `;
+      const overdueFinance = await sql`
+        SELECT id, description, date, type FROM financial_transactions
+        WHERE status != 'Confirmado' AND date < CURRENT_DATE
+        ORDER BY date ASC LIMIT 5
+      `;
+      const todayEvents = await sql`
+        SELECT id, title, start_time FROM agenda_events
+        WHERE date = CURRENT_DATE AND status = 'Pendente'
+        ORDER BY start_time ASC LIMIT 5
+      `;
+
+      const items = [
+        ...overdueProjects.map((p: any) => ({ id: `proj-${p.id}`, text: `Projeto "${p.name}" está com o prazo vencido`, color: "#EF4444", page: "projects" })),
+        ...soonGoals.map((g: any) => ({ id: `goal-${g.id}`, text: `Meta "${g.title}" vence em breve`, color: "#F59E0B", page: "goals" })),
+        ...overdueFinance.map((f: any) => ({ id: `fin-${f.id}`, text: `Lançamento "${f.description}" está pendente e vencido`, color: "#EF4444", page: "financial" })),
+        ...todayEvents.map((e: any) => ({ id: `ev-${e.id}`, text: `Compromisso hoje: "${e.title}"${e.start_time ? ` às ${String(e.start_time).slice(0, 5)}` : ""}`, color: "#06B6D4", page: "agenda" })),
+      ];
+      return res.status(200).json(items);
     }
 
     default:

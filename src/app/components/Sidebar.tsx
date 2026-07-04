@@ -1,10 +1,12 @@
+import { useState, useEffect } from "react";
 import {
   LayoutDashboard, FolderKanban, Lightbulb, Users, Wallet, Calendar,
   Globe, FileText, BookOpen, Target, BarChart3, Settings,
   ChevronLeft, ChevronRight, LogOut, Sun, Moon, Zap
 } from "lucide-react";
-import type { User } from "firebase/auth";
+import type { User as FirebaseUser } from "firebase/auth";
 import type { Page } from "../App";
+import { companySettingsApi } from "../../lib/api";
 
 interface SidebarProps {
   currentPage: Page;
@@ -13,7 +15,7 @@ interface SidebarProps {
   onToggle: () => void;
   darkMode: boolean;
   onToggleDark: () => void;
-  user: User;
+  user: FirebaseUser;
   onLogout: () => void;
 }
 
@@ -60,6 +62,17 @@ export function Sidebar({ currentPage, onNavigate, collapsed, onToggle, darkMode
     .join("")
     .toUpperCase();
 
+  const [company, setCompany] = useState<{ name: string; logo: string }>({ name: "", logo: "" });
+  useEffect(() => {
+    companySettingsApi.get()
+      .then((s) => setCompany({ name: s.name ?? "", logo: s.logo_url ?? "" }))
+      .catch(() => {});
+  }, []);
+
+  const nameParts = (company.name || "DeCaires Technology").trim().split(" ");
+  const brandTitle = nameParts[0] || "DeCaires";
+  const brandSubtitle = nameParts.slice(1).join(" ") || "Technology";
+
   return (
     <aside
       className="flex flex-col h-full border-r overflow-hidden transition-[width] duration-300 ease-in-out no-print"
@@ -73,27 +86,27 @@ export function Sidebar({ currentPage, onNavigate, collapsed, onToggle, darkMode
         {!collapsed && (
           <div className="flex items-center gap-2.5 min-w-0 flex-1">
             <div
-              className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm"
-              style={{ background: "linear-gradient(135deg, #06B6D4 0%, #7C3AED 100%)" }}
+              className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm overflow-hidden"
+              style={{ background: company.logo ? "transparent" : "linear-gradient(135deg, #06B6D4 0%, #7C3AED 100%)" }}
             >
-              <Zap size={15} color="white" />
+              {company.logo ? <img src={company.logo} alt="Logo" className="w-full h-full object-cover" /> : <Zap size={15} color="white" />}
             </div>
             <div className="min-w-0">
-              <div className="font-extrabold text-sm tracking-tight leading-none" style={{ color: "var(--sidebar-foreground)" }}>
-                DeCaires
+              <div className="font-extrabold text-sm tracking-tight leading-none truncate" style={{ color: "var(--sidebar-foreground)" }}>
+                {brandTitle}
               </div>
-              <div className="text-xs leading-none mt-0.5 font-medium" style={{ color: "var(--muted-foreground)" }}>
-                Technology
+              <div className="text-xs leading-none mt-0.5 font-medium truncate" style={{ color: "var(--muted-foreground)" }}>
+                {brandSubtitle}
               </div>
             </div>
           </div>
         )}
         {collapsed && (
           <div
-            className="w-8 h-8 rounded-xl flex items-center justify-center mx-auto shadow-sm"
-            style={{ background: "linear-gradient(135deg, #06B6D4 0%, #7C3AED 100%)" }}
+            className="w-8 h-8 rounded-xl flex items-center justify-center mx-auto shadow-sm overflow-hidden"
+            style={{ background: company.logo ? "transparent" : "linear-gradient(135deg, #06B6D4 0%, #7C3AED 100%)" }}
           >
-            <Zap size={15} color="white" />
+            {company.logo ? <img src={company.logo} alt="Logo" className="w-full h-full object-cover" /> : <Zap size={15} color="white" />}
           </div>
         )}
         <button

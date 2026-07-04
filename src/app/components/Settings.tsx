@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { User, Building, Users, Shield, Bell, Plug, Lock, Palette, CreditCard, ChevronRight, Check, Sun, Moon, Loader2 } from "lucide-react";
+import { User, Building, Users, Shield, Bell, Plug, Lock, Palette, CreditCard, ChevronRight, Check, Sun, Moon, Loader2, Image as ImageIcon } from "lucide-react";
 import { updateProfile, EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "firebase/auth";
 import { useAuth } from "../auth/AuthContext";
 import { auth } from "../../lib/firebase";
 import { companySettingsApi, userSettingsApi, type CompanySettings } from "../../lib/api";
 import { applyAccentColor } from "../../lib/theme";
+import { supabase, PROJECT_FILES_BUCKET } from "../../lib/supabase";
 
 const tabs = [
   { id: "profile", label: "Perfil", icon: User },
@@ -103,7 +104,7 @@ export function Settings({ darkMode, onToggleDark }: SettingsProps) {
   const [pwForm, setPwForm] = useState({ current: "", next: "", confirm: "" });
   const [pwSaving, setPwSaving] = useState(false);
   const [pwMessage, setPwMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
-  const [companyForm, setCompanyForm] = useState<CompanySettings>({ name: "", cnpj: "", sector: "", email: "", website: "", address: "" });
+  const [companyForm, setCompanyForm] = useState<CompanySettings>({ name: "", cnpj: "", sector: "", email: "", website: "", address: "", logo_url: "" });
   const [companyLoading, setCompanyLoading] = useState(true);
   const [companySaving, setCompanySaving] = useState(false);
   const [companySaved, setCompanySaved] = useState(false);
@@ -112,7 +113,7 @@ export function Settings({ darkMode, onToggleDark }: SettingsProps) {
 
   useEffect(() => {
     companySettingsApi.get()
-      .then((s) => setCompanyForm({ name: s.name ?? "", cnpj: s.cnpj ?? "", sector: s.sector ?? "", email: s.email ?? "", website: s.website ?? "", address: s.address ?? "" }))
+      .then((s) => setCompanyForm({ name: s.name ?? "", cnpj: s.cnpj ?? "", sector: s.sector ?? "", email: s.email ?? "", website: s.website ?? "", address: s.address ?? "", logo_url: s.logo_url ?? "" }))
       .catch(() => {})
       .finally(() => setCompanyLoading(false));
     userSettingsApi.get()
@@ -132,6 +133,27 @@ export function Settings({ darkMode, onToggleDark }: SettingsProps) {
       setCompanySaved(true);
     } finally {
       setCompanySaving(false);
+    }
+  }
+
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+
+  async function handleUploadLogo(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setUploadingLogo(true);
+    try {
+      const path = `company-logo/${Date.now()}-${file.name}`;
+      const { error: upErr } = await supabase.storage.from(PROJECT_FILES_BUCKET).upload(path, file);
+      if (upErr) throw upErr;
+      const { data } = supabase.storage.from(PROJECT_FILES_BUCKET).getPublicUrl(path);
+      await companySettingsApi.update({ logo_url: data.publicUrl });
+      setCompanyForm((f) => ({ ...f, logo_url: data.publicUrl }));
+    } catch {
+      // silencioso — se o Storage não estiver configurado, só não atualiza o logo
+    } finally {
+      setUploadingLogo(false);
     }
   }
 
@@ -278,6 +300,20 @@ export function Settings({ darkMode, onToggleDark }: SettingsProps) {
               <div className="text-xs flex items-center gap-2" style={{ color: "var(--muted-foreground)" }}><Loader2 size={12} className="animate-spin" />Carregando...</div>
             ) : (
               <>
+                <div className="flex items-center gap-4">
+                  <div className="w-16 h-16 rounded-2xl flex items-center justify-center overflow-hidden flex-shrink-0" style={{ background: "var(--muted)", border: "1px solid var(--border)" }}>
+                    {companyForm.logo_url ? (
+                      <img src={companyForm.logo_url} alt="Logo" className="w-full h-full object-cover" />
+                    ) : (
+                      <ImageIcon size={22} style={{ color: "var(--muted-foreground)" }} />
+                    )}
+                  </div>
+                  <label className="text-xs px-3 py-2 rounded-lg font-bold cursor-pointer flex items-center gap-2" style={{ background: "var(--muted)", color: "var(--foreground)" }}>
+                    {uploadingLogo && <Loader2 size={12} className="animate-spin" />}
+                    {uploadingLogo ? "Enviando..." : "Trocar logo"}
+                    <input type="file" accept="image/*" className="hidden" onChange={handleUploadLogo} disabled={uploadingLogo} />
+                  </label>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="sm:col-span-2">
                     <FormField label="Nome da empresa" placeholder="Ex: DeCaires Technology" value={companyForm.name ?? ""} onChange={(v) => setCompanyForm({ ...companyForm, name: v })} />

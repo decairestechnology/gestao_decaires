@@ -131,6 +131,9 @@ export default function App() {
           currentPage={currentPage}
           onMenuToggle={() => setMobileSidebarOpen(true)}
           darkMode={darkMode}
+          onNavigate={setCurrentPage}
+          user={user}
+          onLogout={logout}
         />
         <main className="flex-1 overflow-hidden pb-16 md:pb-0">
           {renderPage()}

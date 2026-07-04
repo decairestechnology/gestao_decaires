@@ -267,6 +267,7 @@ export interface CompanySettings {
   email: string | null;
   website: string | null;
   address: string | null;
+  logo_url?: string | null;
 }
 
 export const companySettingsApi = {
@@ -274,7 +275,7 @@ export const companySettingsApi = {
     const res = await fetch("/api/resources/company-settings", { headers: await authHeaders() });
     return handleResponse(res);
   },
-  async update(fields: CompanySettings) {
+  async update(fields: Partial<CompanySettings>) {
     const res = await fetch("/api/resources/company-settings", {
       method: "PATCH",
       headers: await authHeaders(),
@@ -310,6 +311,20 @@ export interface AllDeadlines { projects: DeadlineRow[]; goals: DeadlineRow[]; c
 
 export async function fetchAllDeadlines(): Promise<AllDeadlines> {
   const res = await fetch("/api/resources/all-deadlines", { headers: await authHeaders() });
+  return handleResponse(res);
+}
+
+export interface SearchResult { id: number; title: string; subtitle: string; page: string; icon: string }
+
+export async function globalSearch(q: string): Promise<SearchResult[]> {
+  const res = await fetch(`/api/resources/global-search?q=${encodeURIComponent(q)}`, { headers: await authHeaders() });
+  return handleResponse(res);
+}
+
+export interface NotificationItem { id: string; text: string; color: string; page: string }
+
+export async function fetchNotifications(): Promise<NotificationItem[]> {
+  const res = await fetch("/api/resources/notifications", { headers: await authHeaders() });
   return handleResponse(res);
 }
 
