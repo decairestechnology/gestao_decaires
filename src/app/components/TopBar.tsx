@@ -81,7 +81,7 @@ export function TopBar({ currentPage, onMenuToggle, darkMode }: TopBarProps) {
 
   return (
     <header
-      className="flex items-center justify-between border-b flex-shrink-0 relative z-20"
+      className="flex items-center justify-between border-b flex-shrink-0 relative z-20 no-print"
       style={{ height: 64, paddingLeft: 24, paddingRight: 24, background: "var(--card)", borderColor: "var(--border)" }}
     >
       {/* Left */}

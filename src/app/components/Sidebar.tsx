@@ -62,7 +62,7 @@ export function Sidebar({ currentPage, onNavigate, collapsed, onToggle, darkMode
 
   return (
     <aside
-      className="flex flex-col h-full border-r overflow-hidden transition-[width] duration-300 ease-in-out"
+      className="flex flex-col h-full border-r overflow-hidden transition-[width] duration-300 ease-in-out no-print"
       style={{ width: w, minWidth: w, maxWidth: w, background: "var(--sidebar)", borderColor: "var(--sidebar-border)" }}
     >
       {/* Logo */}

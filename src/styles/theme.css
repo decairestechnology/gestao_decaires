@@ -202,3 +202,15 @@
     line-height: 1.5;
   }
 }
+
+/* Impressão (usado pelo botão "Exportar PDF" dos Relatórios): esconde a navegação
+   e deixa só o conteúdo do relatório, com um cabeçalho próprio pra impressão. */
+.print-only { display: none; }
+
+@media print {
+  .no-print { display: none !important; }
+  .print-only { display: block !important; }
+  body, #root { background: white !important; }
+  main { overflow: visible !important; height: auto !important; }
+  .print-area { overflow: visible !important; height: auto !important; padding: 0 !important; }
+}

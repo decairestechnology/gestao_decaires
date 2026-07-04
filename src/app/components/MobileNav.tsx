@@ -18,7 +18,7 @@ const items = [
 export function MobileNav({ currentPage, onNavigate }: MobileNavProps) {
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 z-30 flex md:hidden border-t safe-area-bottom"
+      className="fixed bottom-0 left-0 right-0 z-30 flex md:hidden border-t safe-area-bottom no-print"
       style={{ background: "var(--card)", borderColor: "var(--border)" }}
     >
       {items.map((item) => {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, X, ChevronDown, ChevronUp, Loader2, Pencil, Trash2, Send } from "lucide-react";
-import { goalsApi, type Goal as ApiGoal } from "../../lib/api";
+import { Plus, X, ChevronDown, ChevronUp, Loader2, Pencil, Trash2, Send, AlertTriangle } from "lucide-react";
+import { goalsApi, projectsApi, type Goal as ApiGoal, type Project } from "../../lib/api";
 
 const categories = ["Financeiras", "Comerciais", "Marketing", "Desenvolvimento", "Operacionais", "Crescimento", "Clientes"];
 const statuses = ["Em andamento", "Concluída", "Pausada", "Atrasada"];
@@ -18,10 +18,12 @@ interface UiGoal {
   desc: string;
   responsible: string;
   deadline: string;
+  rawDeadline: string | null;
   progress: number;
   priority: string;
   status: string;
   category: string;
+  projectId: number | null;
   okrs: UiOkr[];
 }
 
@@ -32,10 +34,12 @@ function toUiGoal(g: ApiGoal): UiGoal {
     desc: g.description ?? "",
     responsible: g.responsible_name ?? "",
     deadline: g.deadline ? new Date(g.deadline).toLocaleDateString("pt-BR") : "—",
+    rawDeadline: g.deadline,
     progress: g.progress ?? 0,
     priority: g.priority,
     status: g.status,
     category: g.category ?? "Operacionais",
+    projectId: g.project_id,
     okrs: (g.okrs ?? []).map((o) => ({ id: o.id, kr: o.description, progress: o.progress })),
   };
 }
@@ -50,12 +54,13 @@ const statusColors: Record<string, { bg: string; text: string }> = {
 
 interface GoalCardProps {
   goal: UiGoal;
+  projectName: string | null;
   onUpdated: (g: UiGoal) => void;
   onDeleted: (id: number) => void;
   onEdit: (g: UiGoal) => void;
 }
 
-function GoalCard({ goal, onUpdated, onDeleted, onEdit }: GoalCardProps) {
+function GoalCard({ goal, projectName, onUpdated, onDeleted, onEdit }: GoalCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -134,6 +139,9 @@ function GoalCard({ goal, onUpdated, onDeleted, onEdit }: GoalCardProps) {
               {statuses.map((st) => <option key={st} value={st}>{st}</option>)}
             </select>
             <span className="text-xs font-semibold" style={{ color: priorityColors[goal.priority] }}>{goal.priority}</span>
+            {projectName && (
+              <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: "var(--muted)", color: "var(--muted-foreground)" }}>📁 {projectName}</span>
+            )}
           </div>
           <div className="flex items-center gap-1 flex-shrink-0">
             <button onClick={() => onEdit(goal)} title="Editar" className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "var(--muted-foreground)" }}>
@@ -238,13 +246,14 @@ function GoalCard({ goal, onUpdated, onDeleted, onEdit }: GoalCardProps) {
   );
 }
 
-const emptyForm = { title: "", deadline: "", description: "", category: "Operacionais", priority: "Média" };
+const emptyForm = { title: "", deadline: "", description: "", category: "Operacionais", priority: "Média", project_id: "" };
 
 export function Goals() {
   const [activeCat, setActiveCat] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [goals, setGoals] = useState<UiGoal[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
@@ -267,7 +276,13 @@ export function Goals() {
 
   useEffect(() => {
     loadGoals();
+    projectsApi.list().then(setProjects).catch(() => {});
   }, [loadGoals]);
+
+  function projectName(id: number | null) {
+    if (!id) return null;
+    return projects.find((p) => p.id === id)?.name ?? null;
+  }
 
   function openCreateModal() {
     setEditingId(null);
@@ -279,7 +294,7 @@ export function Goals() {
 
   function openEditModal(g: UiGoal) {
     setEditingId(g.id);
-    setForm({ title: g.title, deadline: "", description: g.desc, category: g.category, priority: g.priority });
+    setForm({ title: g.title, deadline: "", description: g.desc, category: g.category, priority: g.priority, project_id: g.projectId ? String(g.projectId) : "" });
     setNewOkrDrafts([]);
     setNewOkrInput("");
     setShowModal(true);
@@ -295,10 +310,11 @@ export function Goals() {
     if (!form.title.trim()) return;
     setSaving(true);
     try {
+      const payload = { ...form, project_id: form.project_id ? Number(form.project_id) : null };
       if (editingId) {
-        await goalsApi.update(editingId, form as any);
+        await goalsApi.update(editingId, payload as any);
       } else {
-        await goalsApi.create({ ...form, okrs: newOkrDrafts.map((d) => ({ description: d })) });
+        await goalsApi.create({ ...payload, okrs: newOkrDrafts.map((d) => ({ description: d })) });
       }
       setForm(emptyForm);
       setEditingId(null);
@@ -323,6 +339,17 @@ export function Goals() {
   const filtered = activeCat ? goals.filter(g => g.category === activeCat) : goals;
   const avgProgress = goals.length ? Math.round(goals.reduce((a, g) => a + g.progress, 0) / goals.length) : 0;
 
+  const now = new Date();
+  const deadlineAlerts = goals
+    .filter((g) => g.status !== "Concluída" && g.rawDeadline)
+    .map((g) => {
+      const due = new Date(g.rawDeadline!.slice(0, 10) + "T00:00:00");
+      const days = Math.round((due.getTime() - now.setHours(0, 0, 0, 0)) / (1000 * 60 * 60 * 24));
+      return { goal: g, days };
+    })
+    .filter((x) => x.days <= 7)
+    .sort((a, b) => a.days - b.days);
+
   return (
     <div className="p-6 overflow-y-auto h-full" style={{ scrollbarWidth: "none" }}>
       {error && (
@@ -330,6 +357,19 @@ export function Goals() {
           {error}
         </div>
       )}
+      {deadlineAlerts.length > 0 && (
+        <div className="mb-4 text-sm rounded-lg px-4 py-2.5" style={{ background: "#FFFBEB", color: "#92400E" }}>
+          <div className="font-semibold mb-1 flex items-center gap-1.5"><AlertTriangle size={13} />{deadlineAlerts.length} meta{deadlineAlerts.length > 1 ? "s" : ""} com prazo vencendo</div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+            {deadlineAlerts.slice(0, 6).map(({ goal, days }) => (
+              <span key={goal.id}>
+                {goal.title} — {days < 0 ? `venceu há ${Math.abs(days)}d` : days === 0 ? "vence hoje" : `vence em ${days}d`} ({goal.progress}%)
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Header Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {[
@@ -372,7 +412,7 @@ export function Goals() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {filtered.map(goal => (
-          <GoalCard key={goal.id} goal={goal} onUpdated={handleGoalUpdated} onDeleted={handleGoalDeleted} onEdit={openEditModal} />
+          <GoalCard key={goal.id} goal={goal} projectName={projectName(goal.projectId)} onUpdated={handleGoalUpdated} onDeleted={handleGoalDeleted} onEdit={openEditModal} />
         ))}
         {!loading && filtered.length === 0 && (
           <div className="col-span-full text-center py-12 text-sm" style={{ color: "var(--muted-foreground)" }}>Nenhuma meta encontrada.</div>
@@ -434,6 +474,18 @@ export function Goals() {
                     <option>Alta</option><option>Média</option><option>Baixa</option>
                   </select>
                 </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Projeto (opcional)</label>
+                <select
+                  value={form.project_id}
+                  onChange={(e) => setForm({ ...form, project_id: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                >
+                  <option value="">Nenhum</option>
+                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
               </div>
               {!editingId && (
                 <div>

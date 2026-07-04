@@ -67,13 +67,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     WHERE date >= CURRENT_DATE ORDER BY date ASC, start_time ASC LIMIT 5
   `;
 
-  // Últimos 12 meses de receita/despesa, pra alimentar gráficos de tendência real
+  // Últimos 24 meses de receita/despesa, pra comparar o período atual com o anterior
   const monthlyFinancialRows = await sql`
     SELECT to_char(date_trunc('month', date), 'YYYY-MM') AS month,
            COALESCE(SUM(value) FILTER (WHERE type = 'receita'), 0)::float AS receita,
            COALESCE(SUM(value) FILTER (WHERE type = 'despesa'), 0)::float AS despesa
     FROM financial_transactions
-    WHERE date >= date_trunc('month', CURRENT_DATE) - INTERVAL '11 months'
+    WHERE date >= date_trunc('month', CURRENT_DATE) - INTERVAL '23 months'
+    GROUP BY 1 ORDER BY 1 ASC
+  `;
+
+  const monthlyLeadsRows = await sql`
+    SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*)::int AS total
+    FROM crm_leads
+    WHERE created_at >= date_trunc('month', CURRENT_DATE) - INTERVAL '23 months'
+    GROUP BY 1 ORDER BY 1 ASC
+  `;
+
+  const monthlyProjectsRows = await sql`
+    SELECT to_char(date_trunc('month', created_at), 'YYYY-MM') AS month, COUNT(*)::int AS total
+    FROM projects
+    WHERE created_at >= date_trunc('month', CURRENT_DATE) - INTERVAL '23 months'
     GROUP BY 1 ORDER BY 1 ASC
   `;
 
@@ -84,6 +98,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     funnelRows,
     financial: financialStats,
     monthlyFinancialRows,
+    monthlyLeadsRows,
+    monthlyProjectsRows,
     goals: goalStats,
     events: eventStats,
     recentProjects,

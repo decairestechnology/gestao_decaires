@@ -139,7 +139,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       async function fetchFullGoal(goalId: number) {
         const [full] = await sql`
           SELECT g.id, g.title, g.description, g.responsible_name, g.deadline, g.progress,
-                 g.priority, g.status, g.category, g.created_at,
+                 g.priority, g.status, g.category, g.project_id, g.created_at,
                  COALESCE(
                    (SELECT json_agg(json_build_object('id', kr.id, 'description', kr.description, 'progress', kr.progress) ORDER BY kr.id)
                     FROM goal_key_results kr WHERE kr.goal_id = g.id),
@@ -153,7 +153,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (req.method === "GET") {
         const rows = await sql`
           SELECT g.id, g.title, g.description, g.responsible_name, g.deadline, g.progress,
-                 g.priority, g.status, g.category, g.created_at,
+                 g.priority, g.status, g.category, g.project_id, g.created_at,
                  COALESCE(
                    (SELECT json_agg(json_build_object('id', kr.id, 'description', kr.description, 'progress', kr.progress) ORDER BY kr.id)
                     FROM goal_key_results kr WHERE kr.goal_id = g.id),
@@ -178,6 +178,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               deadline = ${f.deadline ?? null},
               priority = COALESCE(${f.priority ?? null}, priority),
               category = ${f.category ?? null},
+              project_id = ${f.project_id ?? null},
               status = COALESCE(${f.status ?? null}, status)
             WHERE id = ${goalId} RETURNING id
           `;
@@ -216,12 +217,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(204).end();
       }
 
-      const { title, description, deadline, priority, category, okrs } = req.body ?? {};
+      const { title, description, deadline, priority, category, okrs, project_id } = req.body ?? {};
       if (!title) return res.status(400).json({ error: "Título é obrigatório" });
       const responsibleName = niceName(user);
       const [goal] = await sql`
-        INSERT INTO goals (title, description, responsible_name, deadline, progress, priority, status, category)
-        VALUES (${title}, ${description ?? null}, ${responsibleName}, ${deadline || null}, 0, ${priority || "Média"}, 'Em andamento', ${category ?? null})
+        INSERT INTO goals (title, description, responsible_name, deadline, progress, priority, status, category, project_id)
+        VALUES (${title}, ${description ?? null}, ${responsibleName}, ${deadline || null}, 0, ${priority || "Média"}, 'Em andamento', ${category ?? null}, ${project_id ?? null})
         RETURNING id
       `;
       if (Array.isArray(okrs)) {

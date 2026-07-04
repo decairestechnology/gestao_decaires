@@ -164,6 +164,7 @@ export interface Goal {
   priority: string;
   status: string;
   category: string | null;
+  project_id: number | null;
   created_at: string;
   okrs: { id: number; description: string; progress: number }[];
 }

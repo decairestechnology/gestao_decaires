@@ -80,13 +80,46 @@ export function Reports() {
     return result;
   }, [data, period]);
 
+  // Compara o período selecionado com o período equivalente imediatamente anterior
+  // (ex: "Este trimestre" compara os últimos 3 meses com os 3 meses antes deles).
+  function periodComparison(rows: { month: string; total?: number; receita?: number; despesa?: number }[], field: "total" | "receita" | "despesa") {
+    const n = PERIOD_MONTHS[period] ?? 6;
+    const now = new Date();
+    const keyFor = (offset: number) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    };
+    const map = new Map(rows.map((r) => [r.month, r]));
+    let current = 0, previous = 0;
+    for (let i = 0; i < n; i++) {
+      current += Number(map.get(keyFor(i))?.[field] ?? 0);
+      previous += Number(map.get(keyFor(i + n))?.[field] ?? 0);
+    }
+    if (previous === 0) return current > 0 ? { pct: null, label: "novo" } : null;
+    const pct = Math.round(((current - previous) / previous) * 100);
+    return { pct, label: `${pct > 0 ? "+" : ""}${pct}% vs período anterior` };
+  }
+
+  const receitaComparison = useMemo(() => data ? periodComparison(data.monthlyFinancialRows ?? [], "receita") : null, [data, period]);
+  const despesaComparison = useMemo(() => data ? periodComparison(data.monthlyFinancialRows ?? [], "despesa") : null, [data, period]);
+  const leadsComparison = useMemo(() => data ? periodComparison(data.monthlyLeadsRows ?? [], "total") : null, [data, period]);
+  const projectsComparison = useMemo(() => data ? periodComparison(data.monthlyProjectsRows ?? [], "total") : null, [data, period]);
+
+  function deltaBadge(cmp: { pct: number | null; label: string } | null) {
+    if (!cmp) return null;
+    const positive = cmp.pct === null || cmp.pct >= 0;
+    return (
+      <span className="text-xs font-semibold" style={{ color: positive ? "#10B981" : "#EF4444" }}>{cmp.label}</span>
+    );
+  }
+
   const reportCards = data ? [
-    { label: "Projetos", icon: FolderKanban, color: "#06B6D4", stats: [["Total", String(data.projects.total)], ["Concluídos", String(data.projects.concluidos)], ["Atrasados", String(data.projects.atrasados)]] },
-    { label: "Leads e Vendas", icon: Users, color: "#7C3AED", stats: [["Leads totais", String(data.leads.total)], ["Convertidos", String(data.leads.ganhos)], ["Em negociação", String(data.leads.negociacao)]] },
-    { label: "Financeiro (mês)", icon: TrendingUp, color: "#10B981", stats: [["Receita", `R$ ${data.financial.receita.toLocaleString("pt-BR")}`], ["Despesas", `R$ ${data.financial.despesa.toLocaleString("pt-BR")}`], ["Saldo", `R$ ${(data.financial.receita - data.financial.despesa).toLocaleString("pt-BR")}`]] },
-    { label: "Metas", icon: Target, color: "#F59E0B", stats: [["Total", String(data.goals.total)], ["Em andamento", String(data.goals.em_andamento)], ["", ""]] },
-    { label: "Conteúdo", icon: FileText, color: "#EF4444", stats: [["Publicados", String(contentStats.reduce((a, c) => a + c.publicados, 0))], ["Planejados", String(contentStats.reduce((a, c) => a + c.planejados, 0))], ["", ""]] },
-    { label: "Plataformas", icon: Globe, color: "#8B5CF6", stats: [["Ativas", String(platformStats.ativas)], ["Usuários", String(platformStats.usuarios)], ["MRR", `R$ ${platformStats.mrr.toLocaleString("pt-BR")}`]] },
+    { label: "Projetos", icon: FolderKanban, color: "#06B6D4", compare: projectsComparison, stats: [["Total", String(data.projects.total)], ["Concluídos", String(data.projects.concluidos)], ["Atrasados", String(data.projects.atrasados)]] },
+    { label: "Leads e Vendas", icon: Users, color: "#7C3AED", compare: leadsComparison, stats: [["Leads totais", String(data.leads.total)], ["Convertidos", String(data.leads.ganhos)], ["Em negociação", String(data.leads.negociacao)]] },
+    { label: "Financeiro (mês)", icon: TrendingUp, color: "#10B981", compare: receitaComparison, compareLabel: "Receita", compare2: despesaComparison, compare2Label: "Despesa", stats: [["Receita", `R$ ${data.financial.receita.toLocaleString("pt-BR")}`], ["Despesas", `R$ ${data.financial.despesa.toLocaleString("pt-BR")}`], ["Saldo", `R$ ${(data.financial.receita - data.financial.despesa).toLocaleString("pt-BR")}`]] },
+    { label: "Metas", icon: Target, color: "#F59E0B", compare: null, stats: [["Total", String(data.goals.total)], ["Em andamento", String(data.goals.em_andamento)], ["", ""]] },
+    { label: "Conteúdo", icon: FileText, color: "#EF4444", compare: null, stats: [["Publicados", String(contentStats.reduce((a, c) => a + c.publicados, 0))], ["Planejados", String(contentStats.reduce((a, c) => a + c.planejados, 0))], ["", ""]] },
+    { label: "Plataformas", icon: Globe, color: "#8B5CF6", compare: null, stats: [["Ativas", String(platformStats.ativas)], ["Usuários", String(platformStats.usuarios)], ["MRR", `R$ ${platformStats.mrr.toLocaleString("pt-BR")}`]] },
   ] : [];
 
   function handleExportExcel() {
@@ -116,7 +149,16 @@ export function Reports() {
   }
 
   return (
-    <div className="p-6 overflow-y-auto h-full" style={{ scrollbarWidth: "none" }}>
+    <div className="p-6 overflow-y-auto h-full print-area" style={{ scrollbarWidth: "none" }}>
+      <div className="print-only mb-6">
+        <div className="flex items-center gap-2 mb-1">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-sm" style={{ background: "linear-gradient(135deg, #06B6D4, #7C3AED)" }}>DC</div>
+          <div className="font-extrabold text-lg">DeCaires Technology</div>
+        </div>
+        <div className="text-sm text-gray-600">Relatório Executivo — {period}</div>
+        <div className="text-xs text-gray-400">Gerado em {new Date().toLocaleString("pt-BR")}</div>
+        <div className="h-px bg-gray-300 mt-3" />
+      </div>
       {error && (
         <div className="mb-4 text-sm rounded-lg px-4 py-2.5" style={{ background: "#FEF2F2", color: "#991B1B" }}>
           {error}
@@ -162,6 +204,20 @@ export function Reports() {
                   </div>
                 ))}
               </div>
+              {card.compare && (
+                <div className="mt-2 pt-2 border-t space-y-0.5" style={{ borderColor: "var(--border)" }}>
+                  <div className="flex items-center justify-between">
+                    {(card as any).compareLabel && <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>{(card as any).compareLabel}</span>}
+                    {deltaBadge(card.compare)}
+                  </div>
+                  {(card as any).compare2 && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>{(card as any).compare2Label}</span>
+                      {deltaBadge((card as any).compare2)}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           );
         })}
