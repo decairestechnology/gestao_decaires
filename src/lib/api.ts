@@ -680,8 +680,43 @@ export const articleFilesApi = {
     await handleResponse(res);
   },
 };
-export const platformsApi = makeResource("platforms");
-export const contentApi = makeResource("content");
+export const platformsApi = {
+  ...makeResource<Platform>("platforms"),
+  async update(id: number, fields: Partial<Platform> & { tech?: string[] }) {
+    const res = await fetch("/api/resources/platforms", {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ id, fields }),
+    });
+    return handleResponse(res);
+  },
+  async remove(id: number) {
+    const res = await fetch(`/api/resources/platforms?id=${id}`, {
+      method: "DELETE",
+      headers: await authHeaders(),
+    });
+    await handleResponse(res);
+  },
+};
+
+export const contentApi = {
+  ...makeResource<ContentPost>("content"),
+  async update(id: number, fields: Partial<ContentPost> & { hashtags?: string[] }) {
+    const res = await fetch("/api/resources/content", {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify({ id, fields }),
+    });
+    return handleResponse(res);
+  },
+  async remove(id: number) {
+    const res = await fetch(`/api/resources/content?id=${id}`, {
+      method: "DELETE",
+      headers: await authHeaders(),
+    });
+    await handleResponse(res);
+  },
+};
 
 export async function fetchDashboard() {
   const res = await fetch("/api/dashboard", { headers: await authHeaders() });

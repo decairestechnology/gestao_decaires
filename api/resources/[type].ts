@@ -371,6 +371,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     case "platforms": {
+      async function fetchFullPlatform(id: number) {
+        const [full] = await sql`
+          SELECT p.id, p.name, p.logo_emoji, p.description, p.category, p.status, p.responsible_name,
+                 p.launch_date, p.users_count, p.revenue, p.monthly_costs, p.public_link, p.repo_link,
+                 p.prod_link, p.staging_link, p.created_at,
+                 COALESCE((SELECT json_agg(t.tech) FROM platform_tech_stack t WHERE t.platform_id = p.id), '[]') AS tech
+          FROM platforms p WHERE p.id = ${id}
+        `;
+        return full;
+      }
+
       if (req.method === "GET") {
         const rows = await sql`
           SELECT p.id, p.name, p.logo_emoji, p.description, p.category, p.status, p.responsible_name,
@@ -381,12 +392,59 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `;
         return res.status(200).json(rows);
       }
-      const { name, description, category, tech } = req.body ?? {};
+
+      if (req.method === "PATCH") {
+        const body = req.body ?? {};
+        if (!body.id) return res.status(400).json({ error: "id é obrigatório" });
+
+        if (body.fields) {
+          const f = body.fields;
+          const found = await sql`
+            UPDATE platforms SET
+              name = COALESCE(${f.name ?? null}, name),
+              logo_emoji = ${f.logo_emoji ?? null},
+              description = ${f.description ?? null},
+              category = ${f.category ?? null},
+              status = COALESCE(${f.status ?? null}, status),
+              launch_date = ${f.launch_date ?? null},
+              users_count = COALESCE(${f.users_count ?? null}, users_count),
+              revenue = COALESCE(${f.revenue ?? null}, revenue),
+              monthly_costs = COALESCE(${f.monthly_costs ?? null}, monthly_costs),
+              public_link = ${f.public_link ?? null},
+              repo_link = ${f.repo_link ?? null},
+              prod_link = ${f.prod_link ?? null},
+              staging_link = ${f.staging_link ?? null}
+            WHERE id = ${body.id} RETURNING id
+          `;
+          if (found.length === 0) return res.status(404).json({ error: "Plataforma não encontrada" });
+
+          if (Array.isArray(f.tech)) {
+            await sql`DELETE FROM platform_tech_stack WHERE platform_id = ${body.id}`;
+            for (const t of f.tech) {
+              if (t) await sql`INSERT INTO platform_tech_stack (platform_id, tech) VALUES (${body.id}, ${t}) ON CONFLICT DO NOTHING`;
+            }
+          }
+          return res.status(200).json(await fetchFullPlatform(body.id));
+        }
+        return res.status(400).json({ error: "Nada para atualizar" });
+      }
+
+      if (req.method === "DELETE") {
+        const platId = Number(req.query.id);
+        if (!platId) return res.status(400).json({ error: "id é obrigatório" });
+        await sql`DELETE FROM platforms WHERE id = ${platId}`;
+        return res.status(204).end();
+      }
+
+      const {
+        name, description, category, tech, logo_emoji, status, launch_date,
+        users_count, revenue, monthly_costs, public_link, repo_link, prod_link, staging_link,
+      } = req.body ?? {};
       if (!name) return res.status(400).json({ error: "Nome é obrigatório" });
       const responsibleName = niceName(user);
       const [platform] = await sql`
-        INSERT INTO platforms (name, description, category, status, responsible_name, users_count, revenue, monthly_costs)
-        VALUES (${name}, ${description ?? null}, ${category ?? null}, 'Ideia', ${responsibleName}, 0, 0, 0)
+        INSERT INTO platforms (name, description, category, status, responsible_name, logo_emoji, launch_date, users_count, revenue, monthly_costs, public_link, repo_link, prod_link, staging_link)
+        VALUES (${name}, ${description ?? null}, ${category ?? null}, ${status || "Ideia"}, ${responsibleName}, ${logo_emoji ?? null}, ${launch_date ?? null}, ${users_count ?? 0}, ${revenue ?? 0}, ${monthly_costs ?? 0}, ${public_link ?? null}, ${repo_link ?? null}, ${prod_link ?? null}, ${staging_link ?? null})
         RETURNING id
       `;
       if (Array.isArray(tech)) {
@@ -394,17 +452,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (t) await sql`INSERT INTO platform_tech_stack (platform_id, tech) VALUES (${platform.id}, ${t}) ON CONFLICT DO NOTHING`;
         }
       }
-      const [full] = await sql`
-        SELECT p.id, p.name, p.logo_emoji, p.description, p.category, p.status, p.responsible_name,
-               p.launch_date, p.users_count, p.revenue, p.monthly_costs, p.public_link, p.repo_link,
-               p.prod_link, p.staging_link, p.created_at,
-               COALESCE((SELECT json_agg(t.tech) FROM platform_tech_stack t WHERE t.platform_id = p.id), '[]') AS tech
-        FROM platforms p WHERE p.id = ${platform.id}
-      `;
-      return res.status(201).json(full);
+      return res.status(201).json(await fetchFullPlatform(platform.id));
     }
 
     case "content": {
+      async function fetchFullContent(id: number) {
+        const [full] = await sql`
+          SELECT p.id, p.title, p.caption, p.platform, p.type, p.scheduled_date, p.responsible_name,
+                 p.status, p.cta, p.created_at,
+                 COALESCE((SELECT json_agg(h.hashtag) FROM content_hashtags h WHERE h.post_id = p.id), '[]') AS hashtags
+          FROM content_posts p WHERE p.id = ${id}
+        `;
+        return full;
+      }
+
       if (req.method === "GET") {
         const rows = await sql`
           SELECT p.id, p.title, p.caption, p.platform, p.type, p.scheduled_date, p.responsible_name,
@@ -414,12 +475,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `;
         return res.status(200).json(rows);
       }
-      const { title, caption, platform, type: postType, scheduled_date, cta, hashtags } = req.body ?? {};
+
+      if (req.method === "PATCH") {
+        const body = req.body ?? {};
+        if (!body.id) return res.status(400).json({ error: "id é obrigatório" });
+
+        if (body.fields) {
+          const f = body.fields;
+          const found = await sql`
+            UPDATE content_posts SET
+              title = COALESCE(${f.title ?? null}, title),
+              caption = ${f.caption ?? null},
+              platform = ${f.platform ?? null},
+              type = ${f.type ?? null},
+              scheduled_date = ${f.scheduled_date ?? null},
+              status = COALESCE(${f.status ?? null}, status),
+              cta = ${f.cta ?? null}
+            WHERE id = ${body.id} RETURNING id
+          `;
+          if (found.length === 0) return res.status(404).json({ error: "Conteúdo não encontrado" });
+
+          if (Array.isArray(f.hashtags)) {
+            await sql`DELETE FROM content_hashtags WHERE post_id = ${body.id}`;
+            for (const h of f.hashtags) {
+              if (h) await sql`INSERT INTO content_hashtags (post_id, hashtag) VALUES (${body.id}, ${h}) ON CONFLICT DO NOTHING`;
+            }
+          }
+          return res.status(200).json(await fetchFullContent(body.id));
+        }
+        return res.status(400).json({ error: "Nada para atualizar" });
+      }
+
+      if (req.method === "DELETE") {
+        const postId = Number(req.query.id);
+        if (!postId) return res.status(400).json({ error: "id é obrigatório" });
+        await sql`DELETE FROM content_posts WHERE id = ${postId}`;
+        return res.status(204).end();
+      }
+
+      const { title, caption, platform, type: postType, scheduled_date, cta, hashtags, status } = req.body ?? {};
       if (!title) return res.status(400).json({ error: "Título é obrigatório" });
       const responsibleName = niceName(user);
       const [post] = await sql`
         INSERT INTO content_posts (title, caption, platform, type, scheduled_date, responsible_name, status, cta)
-        VALUES (${title}, ${caption ?? null}, ${platform ?? null}, ${postType ?? null}, ${scheduled_date || null}, ${responsibleName}, 'Ideia', ${cta ?? null})
+        VALUES (${title}, ${caption ?? null}, ${platform ?? null}, ${postType ?? null}, ${scheduled_date || null}, ${responsibleName}, ${status || "Ideia"}, ${cta ?? null})
         RETURNING id
       `;
       if (Array.isArray(hashtags)) {
@@ -427,13 +526,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (h) await sql`INSERT INTO content_hashtags (post_id, hashtag) VALUES (${post.id}, ${h}) ON CONFLICT DO NOTHING`;
         }
       }
-      const [full] = await sql`
-        SELECT p.id, p.title, p.caption, p.platform, p.type, p.scheduled_date, p.responsible_name,
-               p.status, p.cta, p.created_at,
-               COALESCE((SELECT json_agg(h.hashtag) FROM content_hashtags h WHERE h.post_id = p.id), '[]') AS hashtags
-        FROM content_posts p WHERE p.id = ${post.id}
-      `;
-      return res.status(201).json(full);
+      return res.status(201).json(await fetchFullContent(post.id));
     }
 
     case "article-revisions": {

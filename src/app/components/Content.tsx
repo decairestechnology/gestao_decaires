@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Plus, X, Instagram, Youtube, Mail, FileText, Loader2 } from "lucide-react";
+import { Plus, X, Instagram, Youtube, Mail, FileText, Loader2, Pencil, Trash2 } from "lucide-react";
 import { contentApi, type ContentPost as ApiContentPost } from "../../lib/api";
 
 const statusColors: Record<string, { bg: string; text: string }> = {
@@ -23,6 +23,7 @@ interface UiContent {
   platform: string;
   type: string;
   date: string;
+  rawDate: string;
   responsible: string;
   status: string;
   hashtags: string[];
@@ -37,6 +38,7 @@ function toUiContent(c: ApiContentPost): UiContent {
     platform: c.platform ?? "—",
     type: c.type ?? "—",
     date: c.scheduled_date ? new Date(c.scheduled_date).toLocaleDateString("pt-BR") : "—",
+    rawDate: c.scheduled_date ? c.scheduled_date.slice(0, 10) : "",
     responsible: c.responsible_name ?? "—",
     status: c.status,
     hashtags: c.hashtags ?? [],
@@ -51,10 +53,11 @@ function PlatformIcon({ platform }: { platform: string }) {
   return <span>{icons[platform] ?? "🌐"}</span>;
 }
 
-const emptyForm = { title: "", caption: "", platform: "Instagram", type: "Post", scheduled_date: "" };
+const emptyForm = { title: "", caption: "", platform: "Instagram", type: "Post", scheduled_date: "", cta: "", hashtagsRaw: "" };
 
 export function Content() {
   const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [platformFilter, setPlatformFilter] = useState("Todas");
   const [statusFilter, setStatusFilter] = useState("Todos");
   const [selected, setSelected] = useState<UiContent | null>(null);
@@ -63,6 +66,9 @@ export function Content() {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [changingStatus, setChangingStatus] = useState(false);
 
   const loadContents = useCallback(async () => {
     setLoading(true);
@@ -81,19 +87,77 @@ export function Content() {
     loadContents();
   }, [loadContents]);
 
-  async function handleCreateContent() {
+  function openCreateModal() {
+    setEditingId(null);
+    setForm(emptyForm);
+    setShowModal(true);
+  }
+
+  function openEditModal(c: UiContent) {
+    setEditingId(c.id);
+    setForm({
+      title: c.title, caption: c.caption, platform: c.platform === "—" ? "Instagram" : c.platform,
+      type: c.type === "—" ? "Post" : c.type, scheduled_date: c.rawDate,
+      cta: c.cta === "—" ? "" : c.cta, hashtagsRaw: c.hashtags.join(", "),
+    });
+    setShowModal(true);
+  }
+
+  async function handleSaveContent() {
     if (!form.title.trim()) return;
     setSaving(true);
     try {
-      await contentApi.create(form);
+      const hashtags = form.hashtagsRaw.split(",").map((h) => h.trim()).filter(Boolean);
+      const payload = { ...form, hashtags };
+      if (editingId) {
+        const updated = await contentApi.update(editingId, payload as any);
+        if (selected?.id === editingId) setSelected(toUiContent(updated));
+      } else {
+        await contentApi.create(payload);
+      }
       setForm(emptyForm);
+      setEditingId(null);
       setShowModal(false);
       await loadContents();
     } catch (err: any) {
-      setError(err?.message ?? "Não foi possível criar o conteúdo.");
+      setError(err?.message ?? "Não foi possível salvar o conteúdo.");
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleDeleteContent() {
+    if (!selected) return;
+    setDeleting(true);
+    try {
+      await contentApi.remove(selected.id);
+      setSelected(null);
+      setConfirmDelete(false);
+      await loadContents();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível excluir o conteúdo.");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  async function handleStatusChange(status: string) {
+    if (!selected) return;
+    setChangingStatus(true);
+    try {
+      const updated = await contentApi.update(selected.id, { status } as any);
+      setSelected(toUiContent(updated));
+      await loadContents();
+    } catch (err: any) {
+      setError(err?.message ?? "Não foi possível mudar o status.");
+    } finally {
+      setChangingStatus(false);
+    }
+  }
+
+  function openContent(c: UiContent) {
+    setSelected(c);
+    setConfirmDelete(false);
   }
 
   const filtered = contents.filter((c) => {
@@ -120,7 +184,7 @@ export function Content() {
           style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}>
           {["Todos", ...Object.keys(statusColors)].map(s => <option key={s}>{s}</option>)}
         </select>
-        <button onClick={() => setShowModal(true)} className="ml-auto flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition hover:opacity-90" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>
+        <button onClick={openCreateModal} className="ml-auto flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition hover:opacity-90" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>
           <Plus size={14} />Novo conteúdo
         </button>
       </div>
@@ -138,12 +202,18 @@ export function Content() {
         })}
       </div>
 
+      {loading && (
+        <div className="flex items-center gap-2 text-sm py-8 justify-center" style={{ color: "var(--muted-foreground)" }}>
+          <Loader2 size={16} className="animate-spin" />Carregando conteúdo...
+        </div>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {filtered.map((c) => {
           const s = statusColors[c.status] ?? { bg: "#F1F5F9", text: "#475569" };
           const pColor = platformColors[c.platform] ?? "#64748B";
           return (
-            <div key={c.id} onClick={() => setSelected(c)}
+            <div key={c.id} onClick={() => openContent(c)}
               className="rounded-xl border p-5 shadow-sm cursor-pointer hover:shadow-md hover:-translate-y-0.5 transition-all"
               style={{ background: "var(--card)", borderColor: "var(--border)" }}>
               <div className="flex items-start justify-between mb-3">
@@ -172,23 +242,62 @@ export function Content() {
             </div>
           );
         })}
+        {!loading && filtered.length === 0 && (
+          <div className="col-span-full text-center py-12 text-sm" style={{ color: "var(--muted-foreground)" }}>Nenhum conteúdo encontrado.</div>
+        )}
       </div>
 
       {selected && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.4)" }}>
-          <div className="w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden" style={{ background: "var(--card)" }}>
-            <div className="flex items-start justify-between px-6 py-5 border-b" style={{ borderColor: "var(--border)" }}>
+          <div className="w-full max-w-lg max-h-[90vh] rounded-2xl shadow-2xl overflow-y-auto" style={{ background: "var(--card)", scrollbarWidth: "none" }}>
+            <div className="flex items-start justify-between px-6 py-5 border-b sticky top-0 z-10" style={{ borderColor: "var(--border)", background: "var(--card)" }}>
               <div>
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-sm"><PlatformIcon platform={selected.platform} /></span>
                   <span className="text-xs font-semibold" style={{ color: platformColors[selected.platform] ?? "#64748B" }}>{selected.platform} · {selected.type}</span>
-                  <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: statusColors[selected.status]?.bg, color: statusColors[selected.status]?.text }}>{selected.status}</span>
                 </div>
                 <h3 className="font-bold" style={{ color: "var(--foreground)" }}>{selected.title}</h3>
               </div>
-              <button onClick={() => setSelected(null)} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <button onClick={() => openEditModal(selected)} title="Editar" className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "var(--muted-foreground)" }}>
+                  <Pencil size={14} />
+                </button>
+                <button onClick={() => setConfirmDelete(true)} title="Excluir" className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "#EF4444" }}>
+                  <Trash2 size={14} />
+                </button>
+                <button onClick={() => setSelected(null)} className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
+              </div>
             </div>
+
+            {confirmDelete && (
+              <div className="px-6 py-3 flex items-center justify-between gap-3" style={{ background: "#FEF2F2" }}>
+                <span className="text-xs font-medium" style={{ color: "#991B1B" }}>Excluir esse conteúdo?</span>
+                <div className="flex gap-2 flex-shrink-0">
+                  <button onClick={() => setConfirmDelete(false)} className="text-xs px-3 py-1.5 rounded-lg font-semibold" style={{ background: "white", color: "var(--foreground)" }}>Cancelar</button>
+                  <button onClick={handleDeleteContent} disabled={deleting} className="text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1.5 disabled:opacity-60" style={{ background: "#EF4444", color: "white" }}>
+                    {deleting && <Loader2 size={11} className="animate-spin" />}Excluir
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="p-6 space-y-4">
+              <div>
+                <div className="text-xs font-semibold mb-2" style={{ color: "var(--foreground)" }}>Status</div>
+                <div className="flex flex-wrap gap-2">
+                  {Object.keys(statusColors).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => handleStatusChange(s)}
+                      disabled={changingStatus || selected.status === s}
+                      className="text-xs px-3 py-1.5 rounded-lg font-semibold disabled:cursor-default"
+                      style={{ background: selected.status === s ? statusColors[s].bg : "var(--muted)", color: selected.status === s ? statusColors[s].text : "var(--muted-foreground)", opacity: changingStatus ? 0.6 : 1 }}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </div>
               <div>
                 <div className="text-xs font-semibold mb-1" style={{ color: "var(--foreground)" }}>Legenda / Caption</div>
                 <p className="text-sm" style={{ color: "var(--muted-foreground)" }}>{selected.caption}</p>
@@ -218,12 +327,12 @@ export function Content() {
 
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.4)" }}>
-          <div className="w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden" style={{ background: "var(--card)" }}>
-            <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: "var(--border)" }}>
-              <h3 className="font-bold" style={{ color: "var(--foreground)" }}>Novo Conteúdo</h3>
-              <button onClick={() => setShowModal(false)} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
+          <div className="w-full max-w-lg max-h-[90vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col" style={{ background: "var(--card)" }}>
+            <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0" style={{ borderColor: "var(--border)" }}>
+              <h3 className="font-bold" style={{ color: "var(--foreground)" }}>{editingId ? "Editar Conteúdo" : "Novo Conteúdo"}</h3>
+              <button onClick={() => { setShowModal(false); setForm(emptyForm); setEditingId(null); }} style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
             </div>
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
               <div>
                 <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Título</label>
                 <input
@@ -279,18 +388,40 @@ export function Content() {
                     style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
                   />
                 </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>CTA</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Comente sua opinião"
+                    value={form.cta}
+                    onChange={(e) => setForm({ ...form, cta: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Hashtags (separadas por vírgula)</label>
+                <input
+                  type="text"
+                  placeholder="#Tech, #Inovação"
+                  value={form.hashtagsRaw}
+                  onChange={(e) => setForm({ ...form, hashtagsRaw: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                />
               </div>
             </div>
-            <div className="flex gap-3 px-6 pb-6">
-              <button onClick={() => { setShowModal(false); setForm(emptyForm); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
+            <div className="flex gap-3 px-6 pb-6 flex-shrink-0">
+              <button onClick={() => { setShowModal(false); setForm(emptyForm); setEditingId(null); }} className="flex-1 py-2 rounded-lg text-sm border font-medium" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
               <button
-                onClick={handleCreateContent}
+                onClick={handleSaveContent}
                 disabled={saving || !form.title.trim()}
                 className="flex-1 py-2 rounded-lg text-sm font-semibold disabled:opacity-50 flex items-center justify-center gap-2"
                 style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
               >
                 {saving && <Loader2 size={13} className="animate-spin" />}
-                Criar
+                {editingId ? "Salvar alterações" : "Criar"}
               </button>
             </div>
           </div>
