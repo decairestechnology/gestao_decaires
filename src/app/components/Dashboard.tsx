@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -6,45 +6,24 @@ import {
 import {
   FolderKanban, AlertTriangle, Users, TrendingUp, TrendingDown,
   Wallet, Calendar, Target, ArrowUpRight, ArrowDownRight,
-  Clock, CheckCircle2, Circle, Sparkles, ArrowRight, Loader2,
+  Clock, CheckCircle2, Circle, Sparkles, ArrowRight, Loader2, Globe,
 } from "lucide-react";
 import type { Page } from "../App";
 import { fetchDashboard } from "../../lib/api";
 import { useAuth } from "../auth/AuthContext";
 
-// Gráficos de tendência (últimos 6 meses, funil, metas em barra) ainda são ilustrativos —
-// viram consultas reais quando houver histórico suficiente acumulado no banco.
-const revenueData = [
-  { month: "Jan", receita: 18500, despesa: 11200 },
-  { month: "Fev", receita: 22000, despesa: 13500 },
-  { month: "Mar", receita: 19800, despesa: 12000 },
-  { month: "Abr", receita: 28500, despesa: 14200 },
-  { month: "Mai", receita: 32000, despesa: 15800 },
-  { month: "Jun", receita: 27500, despesa: 13000 },
-];
+const MONTH_LABELS = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 
-const goalsData = [
-  { goal: "Receita R$200k", progress: 73, color: "#10B981" },
-  { goal: "20 novos clientes", progress: 55, color: "#F59E0B" },
-  { goal: "Lançar plataforma", progress: 88, color: "#10B981" },
-  { goal: "Equipe 10 pessoas", progress: 33, color: "#EF4444" },
-];
-
-const recentActivity = [
-  { text: "Projeto Alpha atualizado por Marcos", time: "5min", icon: FolderKanban, color: "#06B6D4" },
-  { text: "Lead João Silva movido para Proposta", time: "18min", icon: Users, color: "#7C3AED" },
-  { text: "Despesa R$1.200 registrada", time: "1h", icon: Wallet, color: "#EF4444" },
-  { text: "Reunião com Innovate agendada", time: "2h", icon: Calendar, color: "#F59E0B" },
-  { text: "Meta Q2 atingiu 73%", time: "3h", icon: Target, color: "#10B981" },
-];
-
-const pendingTasks = [
-  { text: "Revisar proposta técnica Nexus", priority: "Alta", done: false },
-  { text: "Enviar relatório mensal de custos", priority: "Média", done: false },
-  { text: "Atualizar documentação do Alpha", priority: "Baixa", done: true },
-  { text: "Configurar staging do Beta", priority: "Alta", done: false },
-  { text: "Ligar para lead Maria Fernandes", priority: "Média", done: false },
-];
+function timeAgo(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const min = Math.floor(diffMs / 60000);
+  if (min < 1) return "agora";
+  if (min < 60) return `${min}min`;
+  const hours = Math.floor(min / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  return `${days}d`;
+}
 
 const priorityColors: Record<string, string> = { Alta: "#EF4444", Média: "#F59E0B", Baixa: "#10B981" };
 
@@ -106,6 +85,26 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   const funnelData = stageOrder.map((s) => ({ name: stageLabels[s], value: funnelMap.get(s) ?? 0 }));
   const funnelMax = Math.max(1, ...funnelData.map((f) => f.value));
 
+  const revenueData = useMemo(() => {
+    const rows: { month: string; receita: number; despesa: number }[] = data?.monthlyFinancialRows ?? [];
+    const map = new Map(rows.map((r) => [r.month, r]));
+    const now = new Date();
+    const result = [];
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      const row = map.get(key);
+      result.push({ month: MONTH_LABELS[d.getMonth()], receita: row?.receita ?? 0, despesa: row?.despesa ?? 0 });
+    }
+    return result;
+  }, [data]);
+
+  const goalsData = (data?.topGoals ?? []).map((g: any) => ({
+    goal: g.title,
+    progress: g.progress,
+    color: g.progress >= 70 ? "#10B981" : g.progress >= 40 ? "#F59E0B" : "#EF4444",
+  }));
+
   const kpiCards = data ? [
     { label: "Projetos ativos", value: String(data.projects.total), icon: FolderKanban, color: "#06B6D4", bg: "#E0F9FF", page: "projects" as Page },
     { label: "Projetos atrasados", value: String(data.projects.atrasados), icon: AlertTriangle, color: "#EF4444", bg: "#FEF2F2", page: "projects" as Page },
@@ -114,7 +113,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
     { label: "Despesas do mês", value: `R$${data.financial.despesa.toLocaleString("pt-BR")}`, icon: TrendingDown, color: "#EF4444", bg: "#FEF2F2", page: "financial" as Page },
     { label: "Saldo do mês", value: `R$${(data.financial.receita - data.financial.despesa).toLocaleString("pt-BR")}`, icon: Wallet, color: "#06B6D4", bg: "#E0F9FF", page: "financial" as Page },
     { label: "Compromissos (7 dias)", value: String(data.events.proxima_semana), icon: Calendar, color: "#F59E0B", bg: "#FFFBEB", page: "agenda" as Page },
-    { label: "Metas em andamento", value: String(data.goals.em_andamento), icon: Target, color: "#7C3AED", bg: "#F5F3FF", page: "goals" as Page },
+    { label: "MRR das plataformas", value: `R$${(data.platformStats?.mrr_total ?? 0).toLocaleString("pt-BR")}`, icon: Globe, color: "#8B5CF6", bg: "#F5F3FF", page: "platforms" as Page },
   ] : [];
 
   const displayName = user?.displayName || user?.email?.split("@")[0] || "";
@@ -294,13 +293,13 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         {/* Goals progress */}
         <div className="rounded-2xl border p-5 shadow-sm" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
           <div className="font-bold text-sm mb-1" style={{ color: "var(--foreground)" }}>Progresso das Metas</div>
-          <div className="text-xs mb-4" style={{ color: "var(--muted-foreground)" }}>Metas do trimestre Q2</div>
+          <div className="text-xs mb-4" style={{ color: "var(--muted-foreground)" }}>Metas em andamento, por prazo mais próximo</div>
           <div className="space-y-4">
-            {goalsData.map((g, i) => (
+            {goalsData.map((g: any, i: number) => (
               <div key={i}>
                 <div className="flex justify-between items-center mb-1.5">
-                  <span className="text-xs font-medium" style={{ color: "var(--foreground)" }}>{g.goal}</span>
-                  <span className="text-xs font-bold" style={{ color: g.color }}>{g.progress}%</span>
+                  <span className="text-xs font-medium truncate" style={{ color: "var(--foreground)" }}>{g.goal}</span>
+                  <span className="text-xs font-bold flex-shrink-0 ml-2" style={{ color: g.color }}>{g.progress}%</span>
                 </div>
                 <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--muted)" }}>
                   <div
@@ -310,6 +309,9 @@ export function Dashboard({ onNavigate }: DashboardProps) {
                 </div>
               </div>
             ))}
+            {goalsData.length === 0 && (
+              <div className="text-xs text-center py-4" style={{ color: "var(--muted-foreground)" }}>Nenhuma meta em andamento ainda</div>
+            )}
           </div>
         </div>
       </div>
@@ -354,23 +356,27 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         <div className="rounded-2xl border p-5 shadow-sm" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
           <div className="font-bold text-sm mb-4" style={{ color: "var(--foreground)" }}>Atividades Recentes</div>
           <div className="space-y-3">
-            {recentActivity.map((a, i) => {
-              const Icon = a.icon;
+            {(data.recentActivity ?? []).map((a: any) => {
+              const color = a.source === "crm" ? "#7C3AED" : "#06B6D4";
+              const Icon = a.source === "crm" ? Users : FolderKanban;
               return (
-                <div key={i} className="flex items-start gap-3">
+                <div key={a.id} className="flex items-start gap-3">
                   <div
                     className="w-7 h-7 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
-                    style={{ background: `${a.color}18` }}
+                    style={{ background: `${color}18` }}
                   >
-                    <Icon size={13} style={{ color: a.color }} />
+                    <Icon size={13} style={{ color }} />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-xs leading-snug" style={{ color: "var(--foreground)" }}>{a.text}</div>
-                    <div className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>há {a.time}</div>
+                    <div className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>há {timeAgo(a.created_at)}</div>
                   </div>
                 </div>
               );
             })}
+            {(data.recentActivity ?? []).length === 0 && (
+              <div className="text-xs text-center py-4" style={{ color: "var(--muted-foreground)" }}>Nenhuma atividade registrada ainda</div>
+            )}
           </div>
         </div>
 
@@ -379,33 +385,28 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           <div className="flex items-center justify-between mb-4">
             <div className="font-bold text-sm" style={{ color: "var(--foreground)" }}>Tarefas Pendentes</div>
             <span className="text-xs px-2 py-0.5 rounded-full font-bold" style={{ background: "#FEF2F2", color: "#EF4444" }}>
-              {pendingTasks.filter(t => !t.done).length}
+              {(data.pendingProjectTasks ?? []).length}
             </span>
           </div>
           <div className="space-y-2.5">
-            {pendingTasks.map((t, i) => (
-              <div key={i} className="flex items-start gap-2.5">
-                {t.done
-                  ? <CheckCircle2 size={15} className="flex-shrink-0 mt-0.5" style={{ color: "#10B981" }} />
-                  : <Circle size={15} className="flex-shrink-0 mt-0.5" style={{ color: "var(--border)" }} />}
-                <span
-                  className="flex-1 text-xs leading-snug"
-                  style={{
-                    color: t.done ? "var(--muted-foreground)" : "var(--foreground)",
-                    textDecoration: t.done ? "line-through" : "none",
-                    opacity: t.done ? 0.6 : 1,
-                  }}
-                >
-                  {t.text}
-                </span>
+            {(data.pendingProjectTasks ?? []).map((t: any) => (
+              <div key={t.id} className="flex items-start gap-2.5">
+                <Circle size={15} className="flex-shrink-0 mt-0.5" style={{ color: "var(--border)" }} />
+                <div className="flex-1 min-w-0">
+                  <span className="text-xs leading-snug block" style={{ color: "var(--foreground)" }}>{t.title}</span>
+                  <span className="text-xs" style={{ color: "var(--muted-foreground)" }}>{t.project_name}</span>
+                </div>
                 <span
                   className="text-xs px-1.5 py-0.5 rounded-md flex-shrink-0 font-bold"
-                  style={{ background: `${priorityColors[t.priority]}15`, color: priorityColors[t.priority] }}
+                  style={{ background: `${priorityColors[t.priority] ?? "#94A3B8"}15`, color: priorityColors[t.priority] ?? "#94A3B8" }}
                 >
                   {t.priority}
                 </span>
               </div>
             ))}
+            {(data.pendingProjectTasks ?? []).length === 0 && (
+              <div className="text-xs text-center py-4" style={{ color: "var(--muted-foreground)" }}>Nenhuma tarefa pendente 🎉</div>
+            )}
           </div>
         </div>
       </div>

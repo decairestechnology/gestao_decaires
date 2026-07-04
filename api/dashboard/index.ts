@@ -91,6 +91,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     GROUP BY 1 ORDER BY 1 ASC
   `;
 
+  const topGoals = await sql`
+    SELECT id, title, progress FROM goals
+    WHERE status = 'Em andamento'
+    ORDER BY deadline ASC NULLS LAST, created_at DESC
+    LIMIT 4
+  `;
+
+  const pendingProjectTasks = await sql`
+    SELECT t.id, t.title, t.priority, t.due_date, p.name AS project_name
+    FROM project_tasks t
+    JOIN projects p ON p.id = t.project_id
+    WHERE t.done = false
+    ORDER BY t.due_date ASC NULLS LAST, t.created_at DESC
+    LIMIT 6
+  `;
+
+  const [platformStats] = await sql`
+    SELECT COALESCE(SUM(revenue), 0)::float AS mrr_total,
+           COUNT(*) FILTER (WHERE status = 'Produção')::int AS ativas
+    FROM platforms
+  `;
+
+  // Últimas atividades reais (CRM + Projetos), unificadas por data
+  const recentCrmActivities = await sql`
+    SELECT a.id, a.note, a.created_at, l.name AS lead_name
+    FROM crm_lead_activities a JOIN crm_leads l ON l.id = a.lead_id
+    ORDER BY a.created_at DESC LIMIT 5
+  `;
+  const recentProjectActivities = await sql`
+    SELECT a.id, a.note, a.created_at, p.name AS project_name
+    FROM project_activities a JOIN projects p ON p.id = a.project_id
+    ORDER BY a.created_at DESC LIMIT 5
+  `;
+  const recentActivity = [
+    ...recentCrmActivities.map((a: any) => ({ id: `crm-${a.id}`, text: `${a.lead_name}: ${a.note}`, created_at: a.created_at, source: "crm" })),
+    ...recentProjectActivities.map((a: any) => ({ id: `proj-${a.id}`, text: `${a.project_name}: ${a.note}`, created_at: a.created_at, source: "projects" })),
+  ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()).slice(0, 5);
+
   return res.status(200).json({
     projects: projectStats,
     projectStatusRows,
@@ -104,5 +142,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     events: eventStats,
     recentProjects,
     upcomingEvents,
+    topGoals,
+    pendingProjectTasks,
+    platformStats,
+    recentActivity,
   });
 }
