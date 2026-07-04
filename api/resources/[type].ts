@@ -495,6 +495,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(rows);
     }
 
+    case "company-settings": {
+      if (req.method === "GET") {
+        const [row] = await sql`SELECT name, cnpj, sector, email, website, address FROM company_settings WHERE id = 1`;
+        return res.status(200).json(row ?? { name: "", cnpj: "", sector: "", email: "", website: "", address: "" });
+      }
+      if (req.method === "PATCH") {
+        const { name, cnpj, sector, email, website, address } = req.body ?? {};
+        await sql`
+          INSERT INTO company_settings (id, name, cnpj, sector, email, website, address, updated_at)
+          VALUES (1, ${name ?? null}, ${cnpj ?? null}, ${sector ?? null}, ${email ?? null}, ${website ?? null}, ${address ?? null}, now())
+          ON CONFLICT (id) DO UPDATE SET
+            name = ${name ?? null}, cnpj = ${cnpj ?? null}, sector = ${sector ?? null},
+            email = ${email ?? null}, website = ${website ?? null}, address = ${address ?? null}, updated_at = now()
+        `;
+        const [row] = await sql`SELECT name, cnpj, sector, email, website, address FROM company_settings WHERE id = 1`;
+        return res.status(200).json(row);
+      }
+      res.setHeader("Allow", "GET, PATCH");
+      return res.status(405).json({ error: "Método não permitido" });
+    }
+
+    case "user-settings": {
+      if (req.method === "GET") {
+        const [row] = await sql`SELECT dark_mode, accent_color, notifications FROM user_settings WHERE firebase_uid = ${user.uid}`;
+        return res.status(200).json(row ?? { dark_mode: false, accent_color: "#06B6D4", notifications: {} });
+      }
+      if (req.method === "PATCH") {
+        const { dark_mode, accent_color, notifications } = req.body ?? {};
+        const [current] = await sql`SELECT dark_mode, accent_color, notifications FROM user_settings WHERE firebase_uid = ${user.uid}`;
+        const merged = {
+          dark_mode: dark_mode !== undefined ? dark_mode : (current?.dark_mode ?? false),
+          accent_color: accent_color ?? current?.accent_color ?? "#06B6D4",
+          notifications: notifications ? { ...(current?.notifications ?? {}), ...notifications } : (current?.notifications ?? {}),
+        };
+        await sql`
+          INSERT INTO user_settings (firebase_uid, dark_mode, accent_color, notifications, updated_at)
+          VALUES (${user.uid}, ${merged.dark_mode}, ${merged.accent_color}, ${JSON.stringify(merged.notifications)}, now())
+          ON CONFLICT (firebase_uid) DO UPDATE SET
+            dark_mode = ${merged.dark_mode}, accent_color = ${merged.accent_color},
+            notifications = ${JSON.stringify(merged.notifications)}, updated_at = now()
+        `;
+        return res.status(200).json(merged);
+      }
+      res.setHeader("Allow", "GET, PATCH");
+      return res.status(405).json({ error: "Método não permitido" });
+    }
+
     default:
       return res.status(404).json({ error: `Recurso "${type}" não existe` });
   }

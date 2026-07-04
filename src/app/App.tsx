@@ -17,6 +17,8 @@ import { Reports } from "./components/Reports";
 import { Settings } from "./components/Settings";
 import { useAuth } from "./auth/AuthContext";
 import { Login } from "./auth/Login";
+import { userSettingsApi } from "../lib/api";
+import { applyAccentColor } from "../lib/theme";
 
 export type Page =
   | "dashboard" | "projects" | "ideas" | "crm" | "financial" | "agenda"
@@ -44,6 +46,12 @@ export default function App() {
     window.location.hash = page;
   }
 
+  function toggleDarkMode() {
+    const next = !darkMode;
+    setDarkMode(next);
+    userSettingsApi.update({ dark_mode: next }).catch(() => {});
+  }
+
   useEffect(() => {
     const onHashChange = () => setCurrentPageState(pageFromHash());
     window.addEventListener("hashchange", onHashChange);
@@ -53,6 +61,15 @@ export default function App() {
   useEffect(() => {
     document.documentElement.classList.toggle("dark", darkMode);
   }, [darkMode]);
+
+  // Carrega tema e cor de destaque salvos assim que a pessoa loga
+  useEffect(() => {
+    if (!user) return;
+    userSettingsApi.get().then((s) => {
+      setDarkMode(!!s.dark_mode);
+      if (s.accent_color) applyAccentColor(s.accent_color);
+    }).catch(() => {});
+  }, [user?.uid]);
 
   if (loading) {
     return (
@@ -79,7 +96,7 @@ export default function App() {
       case "knowledge": return <Knowledge />;
       case "goals": return <Goals />;
       case "reports": return <Reports />;
-      case "settings": return <Settings darkMode={darkMode} onToggleDark={() => setDarkMode(!darkMode)} />;
+      case "settings": return <Settings darkMode={darkMode} onToggleDark={toggleDarkMode} />;
       default: return <Dashboard onNavigate={setCurrentPage} />;
     }
   };
@@ -102,7 +119,7 @@ export default function App() {
           collapsed={sidebarCollapsed}
           onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
           darkMode={darkMode}
-          onToggleDark={() => setDarkMode(!darkMode)}
+          onToggleDark={toggleDarkMode}
           user={user}
           onLogout={logout}
         />

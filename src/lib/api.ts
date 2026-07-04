@@ -255,6 +255,52 @@ export async function fetchAllProjectFiles(): Promise<AllProjectFile[]> {
   const res = await fetch("/api/resources/project-files-all", { headers: await authHeaders() });
   return handleResponse(res);
 }
+
+export interface CompanySettings {
+  name: string | null;
+  cnpj: string | null;
+  sector: string | null;
+  email: string | null;
+  website: string | null;
+  address: string | null;
+}
+
+export const companySettingsApi = {
+  async get(): Promise<CompanySettings> {
+    const res = await fetch("/api/resources/company-settings", { headers: await authHeaders() });
+    return handleResponse(res);
+  },
+  async update(fields: CompanySettings) {
+    const res = await fetch("/api/resources/company-settings", {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify(fields),
+    });
+    return handleResponse(res);
+  },
+};
+
+export interface UserSettings {
+  dark_mode: boolean;
+  accent_color: string;
+  notifications: Record<string, boolean>;
+}
+
+export const userSettingsApi = {
+  async get(): Promise<UserSettings> {
+    const res = await fetch("/api/resources/user-settings", { headers: await authHeaders() });
+    return handleResponse(res);
+  },
+  async update(fields: Partial<UserSettings>) {
+    const res = await fetch("/api/resources/user-settings", {
+      method: "PATCH",
+      headers: await authHeaders(),
+      body: JSON.stringify(fields),
+    });
+    return handleResponse(res);
+  },
+};
+
 function makeResource<T = any>(type: string) {
   return {
     async list(): Promise<T[]> {
