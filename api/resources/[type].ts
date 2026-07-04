@@ -376,7 +376,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       async function fetchFullPlatform(id: number) {
         const [full] = await sql`
           SELECT p.id, p.name, p.logo_emoji, p.description, p.category, p.status, p.responsible_name,
-                 p.launch_date, p.users_count, p.revenue, p.monthly_costs, p.public_link, p.repo_link,
+                 p.launch_date, p.users_count, p.revenue, p.monthly_costs, p.pricing_model, p.price_per_user, p.paying_users_count, p.public_link, p.repo_link,
                  p.prod_link, p.staging_link, p.created_at,
                  COALESCE((SELECT json_agg(t.tech) FROM platform_tech_stack t WHERE t.platform_id = p.id), '[]') AS tech
           FROM platforms p WHERE p.id = ${id}
@@ -387,7 +387,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (req.method === "GET") {
         const rows = await sql`
           SELECT p.id, p.name, p.logo_emoji, p.description, p.category, p.status, p.responsible_name,
-                 p.launch_date, p.users_count, p.revenue, p.monthly_costs, p.public_link, p.repo_link,
+                 p.launch_date, p.users_count, p.revenue, p.monthly_costs, p.pricing_model, p.price_per_user, p.paying_users_count, p.public_link, p.repo_link,
                  p.prod_link, p.staging_link, p.created_at,
                  COALESCE((SELECT json_agg(t.tech) FROM platform_tech_stack t WHERE t.platform_id = p.id), '[]') AS tech
           FROM platforms p ORDER BY p.created_at DESC
@@ -401,6 +401,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (body.fields) {
           const f = body.fields;
+          const nextPricingModel = f.pricing_model ?? null;
+          const nextPricePerUser = f.price_per_user ?? null;
+          const nextPayingUsers = f.paying_users_count ?? null;
+          // Se o modelo for Assinatura, a receita é sempre preço x assinantes (calculada aqui,
+          // ignorando qualquer valor de "revenue" enviado direto pra esse caso).
+          const [currentP] = await sql`SELECT pricing_model, price_per_user, paying_users_count FROM platforms WHERE id = ${body.id}`;
+          const effectiveModel = nextPricingModel ?? currentP?.pricing_model ?? "Não monetizado";
+          const effectivePrice = nextPricePerUser ?? currentP?.price_per_user ?? 0;
+          const effectivePaying = nextPayingUsers ?? currentP?.paying_users_count ?? 0;
+          const computedRevenue = effectiveModel === "Assinatura" ? Number(effectivePrice) * Number(effectivePaying) : (f.revenue ?? null);
+
           const found = await sql`
             UPDATE platforms SET
               name = COALESCE(${f.name ?? null}, name),
@@ -410,7 +421,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               status = COALESCE(${f.status ?? null}, status),
               launch_date = COALESCE(${f.launch_date ?? null}, launch_date),
               users_count = COALESCE(${f.users_count ?? null}, users_count),
-              revenue = COALESCE(${f.revenue ?? null}, revenue),
+              pricing_model = COALESCE(${nextPricingModel}, pricing_model),
+              price_per_user = COALESCE(${nextPricePerUser}, price_per_user),
+              paying_users_count = COALESCE(${nextPayingUsers}, paying_users_count),
+              revenue = COALESCE(${computedRevenue}, revenue),
               monthly_costs = COALESCE(${f.monthly_costs ?? null}, monthly_costs),
               public_link = COALESCE(${f.public_link ?? null}, public_link),
               repo_link = COALESCE(${f.repo_link ?? null}, repo_link),
@@ -441,12 +455,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const {
         name, description, category, tech, logo_emoji, status, launch_date,
         users_count, revenue, monthly_costs, public_link, repo_link, prod_link, staging_link,
+        pricing_model, price_per_user, paying_users_count,
       } = req.body ?? {};
       if (!name) return res.status(400).json({ error: "Nome é obrigatório" });
       const responsibleName = niceName(user);
+      const model = pricing_model || "Não monetizado";
+      const finalRevenue = model === "Assinatura" ? Number(price_per_user ?? 0) * Number(paying_users_count ?? 0) : (revenue ?? 0);
       const [platform] = await sql`
-        INSERT INTO platforms (name, description, category, status, responsible_name, logo_emoji, launch_date, users_count, revenue, monthly_costs, public_link, repo_link, prod_link, staging_link)
-        VALUES (${name}, ${description ?? null}, ${category ?? null}, ${status || "Ideia"}, ${responsibleName}, ${logo_emoji ?? null}, ${launch_date ?? null}, ${users_count ?? 0}, ${revenue ?? 0}, ${monthly_costs ?? 0}, ${public_link ?? null}, ${repo_link ?? null}, ${prod_link ?? null}, ${staging_link ?? null})
+        INSERT INTO platforms (name, description, category, status, responsible_name, logo_emoji, launch_date, users_count, revenue, monthly_costs, public_link, repo_link, prod_link, staging_link, pricing_model, price_per_user, paying_users_count)
+        VALUES (${name}, ${description ?? null}, ${category ?? null}, ${status || "Ideia"}, ${responsibleName}, ${logo_emoji ?? null}, ${launch_date ?? null}, ${users_count ?? 0}, ${finalRevenue}, ${monthly_costs ?? 0}, ${public_link ?? null}, ${repo_link ?? null}, ${prod_link ?? null}, ${staging_link ?? null}, ${model}, ${price_per_user ?? 0}, ${paying_users_count ?? 0})
         RETURNING id
       `;
       if (Array.isArray(tech)) {

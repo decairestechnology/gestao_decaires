@@ -25,6 +25,9 @@ interface UiPlatform {
   users: number;
   revenue: number;
   costs: number;
+  pricingModel: string;
+  pricePerUser: number;
+  payingUsers: number;
   link: string;
   repo: string;
   prod: string;
@@ -45,6 +48,9 @@ function toUiPlatform(p: ApiPlatform): UiPlatform {
     users: p.users_count ?? 0,
     revenue: Number(p.revenue) || 0,
     costs: Number(p.monthly_costs) || 0,
+    pricingModel: p.pricing_model || "Não monetizado",
+    pricePerUser: Number(p.price_per_user) || 0,
+    payingUsers: p.paying_users_count ?? 0,
     link: p.public_link ?? "—",
     repo: p.repo_link ?? "—",
     prod: p.prod_link ?? "—",
@@ -52,9 +58,12 @@ function toUiPlatform(p: ApiPlatform): UiPlatform {
   };
 }
 
+const PRICING_MODELS = ["Não monetizado", "Assinatura", "Pagamento único", "Anúncios"];
+
 const emptyForm = {
   name: "", category: "", description: "", logo_emoji: "", status: "Ideia", launch_date: "",
   users_count: "", revenue: "", monthly_costs: "", public_link: "", repo_link: "", prod_link: "", staging_link: "", techRaw: "",
+  pricing_model: "Não monetizado", price_per_user: "", paying_users_count: "",
 };
 
 export function Platforms() {
@@ -153,6 +162,7 @@ export function Platforms() {
       public_link: p.link === "—" ? "" : p.link, repo_link: p.repo === "—" ? "" : p.repo,
       prod_link: p.prod === "—" ? "" : p.prod, staging_link: p.staging === "—" ? "" : p.staging,
       techRaw: p.tech.join(", "),
+      pricing_model: p.pricingModel, price_per_user: String(p.pricePerUser || ""), paying_users_count: String(p.payingUsers || ""),
     });
     setShowModal(true);
   }
@@ -168,6 +178,8 @@ export function Platforms() {
         users_count: form.users_count ? Number(form.users_count) : 0,
         revenue: form.revenue ? Number(form.revenue) : 0,
         monthly_costs: form.monthly_costs ? Number(form.monthly_costs) : 0,
+        price_per_user: form.price_per_user ? Number(form.price_per_user) : 0,
+        paying_users_count: form.paying_users_count ? Number(form.paying_users_count) : 0,
       };
       if (editingId) {
         const updated = await platformsApi.update(editingId, payload as any);
@@ -345,13 +357,21 @@ export function Platforms() {
                 </div>
               </div>
 
+              <div className="rounded-xl p-4" style={{ background: "linear-gradient(135deg, #06B6D420, #7C3AED20)" }}>
+                <div className="text-xs mb-1" style={{ color: "var(--muted-foreground)" }}>
+                  {selected.pricingModel === "Assinatura" ? `Assinatura · R$ ${selected.pricePerUser.toLocaleString("pt-BR")}/mês × ${selected.payingUsers} assinantes` : selected.pricingModel}
+                </div>
+                <div className="text-2xl font-extrabold" style={{ color: "var(--foreground)" }}>
+                  R$ {selected.revenue.toLocaleString("pt-BR")}<span className="text-sm font-medium" style={{ color: "var(--muted-foreground)" }}>/mês (MRR)</span>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 {[
                   ["Responsável", selected.responsible],
                   ["Lançamento", selected.launch],
-                  ["Usuários", selected.users.toString()],
-                  ["Receita", selected.revenue > 0 ? `R$ ${selected.revenue.toLocaleString("pt-BR")}/mês` : "—"],
-                  ["Custos", selected.costs > 0 ? `R$ ${selected.costs.toLocaleString("pt-BR")}/mês` : "—"],
+                  ["Usuários / Downloads", selected.users.toString()],
+                  ["Custos mensais", selected.costs > 0 ? `R$ ${selected.costs.toLocaleString("pt-BR")}/mês` : "—"],
                 ].map(([k, v]) => (
                   <div key={k as string} className="rounded-lg p-3" style={{ background: "var(--muted)" }}>
                     <div className="text-xs mb-0.5" style={{ color: "var(--muted-foreground)" }}>{k as string}</div>
@@ -384,30 +404,32 @@ export function Platforms() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="rounded-lg p-3" style={{ background: "var(--muted)" }}>
-                    <div className="text-xs mb-0.5" style={{ color: "var(--muted-foreground)" }}>Margem estimada/mês</div>
+                    <div className="text-xs mb-0.5" style={{ color: "var(--muted-foreground)" }}>Margem/mês (MRR − Custos)</div>
                     <div className="text-sm font-bold" style={{ color: selected.revenue - selected.costs >= 0 ? "#10B981" : "#EF4444" }}>
                       R$ {(selected.revenue - selected.costs).toLocaleString("pt-BR")}
                     </div>
                   </div>
                   <div className="rounded-lg p-3" style={{ background: "var(--muted)" }}>
-                    <div className="text-xs mb-0.5" style={{ color: "var(--muted-foreground)" }}>Receita por usuário</div>
+                    <div className="text-xs mb-0.5" style={{ color: "var(--muted-foreground)" }}>Receita por usuário ativo</div>
                     <div className="text-sm font-bold" style={{ color: "var(--foreground)" }}>
                       {selected.users > 0 ? `R$ ${(selected.revenue / selected.users).toFixed(2)}` : "—"}
                     </div>
                   </div>
                 </div>
-                <p className="text-xs mt-1.5" style={{ color: "var(--muted-foreground)" }}>Baseado nos valores de "Receita" e "Custos" cadastrados acima (estimativa manual).</p>
               </div>
 
               <div>
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: "var(--foreground)" }}>
-                    <DollarSign size={13} />Financeiro real (lançamentos)
+                    <DollarSign size={13} />Lançamentos financeiros (opcional)
                   </div>
                   <button onClick={() => setShowTxForm((v) => !v)} className="text-xs px-2 py-1 rounded-md font-semibold" style={{ background: "var(--muted)", color: "var(--foreground)" }}>
                     {showTxForm ? "Fechar" : "+ Lançamento"}
                   </button>
                 </div>
+                <p className="text-xs mb-2" style={{ color: "var(--muted-foreground)" }}>
+                  Pra registrar entradas/saídas exatas dessa plataforma (ex: fatura de hospedagem, um pagamento específico). O MRR lá em cima já é calculado sozinho, isso aqui é só extra.
+                </p>
                 <div className="grid grid-cols-3 gap-2 mb-3">
                   <div className="rounded-lg p-2 text-center" style={{ background: "var(--muted)" }}>
                     <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>Recebido</div>
@@ -526,8 +548,8 @@ export function Platforms() {
                   style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
                 />
               </div>
-              <div className="grid grid-cols-3 gap-3">
-                {[["Lançamento", "text", "Set 2026", "launch_date"], ["Usuários", "number", "0", "users_count"], ["Receita (R$/mês)", "number", "0", "revenue"]].map(([l, t, ph, key]) => (
+              <div className="grid grid-cols-2 gap-3">
+                {[["Lançamento", "text", "Set 2026", "launch_date"], ["Usuários / Downloads", "number", "0", "users_count"]].map(([l, t, ph, key]) => (
                   <div key={l as string}>
                     <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>{l as string}</label>
                     <input
@@ -539,14 +561,69 @@ export function Platforms() {
                   </div>
                 ))}
               </div>
-              <div>
-                <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Custos mensais (R$)</label>
-                <input
-                  type="number" placeholder="0" value={form.monthly_costs}
-                  onChange={(e) => setForm({ ...form, monthly_costs: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
-                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
-                />
+
+              <div className="rounded-xl border p-3 space-y-3" style={{ borderColor: "var(--border)", background: "var(--muted)" }}>
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Como essa plataforma gera receita?</label>
+                  <select
+                    value={form.pricing_model}
+                    onChange={(e) => setForm({ ...form, pricing_model: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  >
+                    {PRICING_MODELS.map((m) => <option key={m}>{m}</option>)}
+                  </select>
+                </div>
+
+                {form.pricing_model === "Assinatura" ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Preço do plano (R$/mês)</label>
+                        <input
+                          type="number" placeholder="9,90" value={form.price_per_user}
+                          onChange={(e) => setForm({ ...form, price_per_user: e.target.value })}
+                          className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                          style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Assinantes pagantes</label>
+                        <input
+                          type="number" placeholder="0" value={form.paying_users_count}
+                          onChange={(e) => setForm({ ...form, paying_users_count: e.target.value })}
+                          className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                          style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                        />
+                      </div>
+                    </div>
+                    <div className="text-xs px-3 py-2 rounded-lg" style={{ background: "var(--card)", color: "var(--muted-foreground)" }}>
+                      MRR calculado: <strong style={{ color: "#10B981" }}>
+                        R$ {((Number(form.price_per_user) || 0) * (Number(form.paying_users_count) || 0)).toLocaleString("pt-BR")}/mês
+                      </strong>
+                    </div>
+                  </>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Receita mensal (R$)</label>
+                    <input
+                      type="number" placeholder="0" value={form.revenue}
+                      onChange={(e) => setForm({ ...form, revenue: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                      style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                    />
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Custos mensais (R$)</label>
+                  <input
+                    type="number" placeholder="0" value={form.monthly_costs}
+                    onChange={(e) => setForm({ ...form, monthly_costs: e.target.value })}
+                    className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                    style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                  />
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 {[["Link público", "public_link"], ["Repositório", "repo_link"], ["Produção", "prod_link"], ["Staging", "staging_link"]].map(([l, key]) => (

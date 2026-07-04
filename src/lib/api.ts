@@ -216,6 +216,9 @@ export interface Platform {
   users_count: number;
   revenue: string;
   monthly_costs: string;
+  pricing_model: string;
+  price_per_user: string;
+  paying_users_count: number;
   public_link: string | null;
   repo_link: string | null;
   prod_link: string | null;
