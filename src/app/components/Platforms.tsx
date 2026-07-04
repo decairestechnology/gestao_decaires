@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
-import { Plus, ExternalLink, Github, Users, X, Globe, Loader2, Pencil, Trash2 } from "lucide-react";
-import { platformsApi, type Platform as ApiPlatform } from "../../lib/api";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { Plus, ExternalLink, Github, Users, X, Globe, Loader2, Pencil, Trash2, DollarSign, CheckCircle2, TrendingUp } from "lucide-react";
+import { platformsApi, transactionsApi, type Platform as ApiPlatform, type Transaction } from "../../lib/api";
 
 const statusColors: Record<string, { bg: string; text: string }> = {
   Ideia: { bg: "#F1F5F9", text: "#475569" },
@@ -70,6 +70,56 @@ export function Platforms() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [changingStatus, setChangingStatus] = useState(false);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [txLoading, setTxLoading] = useState(false);
+  const [showTxForm, setShowTxForm] = useState(false);
+  const [txForm, setTxForm] = useState({ description: "", value: "", type: "receita", status: "Pendente" });
+  const [savingTx, setSavingTx] = useState(false);
+  const [confirmingTxId, setConfirmingTxId] = useState<number | null>(null);
+
+  const loadTransactions = useCallback(async (platformId: number) => {
+    setTxLoading(true);
+    try {
+      const all = await transactionsApi.list();
+      setTransactions(all.filter((t) => t.platform_id === platformId));
+    } catch {
+      // silencioso, não trava o resto da tela
+    } finally {
+      setTxLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (selected) loadTransactions(selected.id);
+    else { setTransactions([]); setShowTxForm(false); }
+  }, [selected?.id, loadTransactions]);
+
+  async function handleSaveTx() {
+    if (!selected || !txForm.description.trim() || !txForm.value) return;
+    setSavingTx(true);
+    try {
+      await transactionsApi.create({ ...txForm, value: Number(txForm.value), platform_id: selected.id, client: selected.name });
+      setTxForm({ description: "", value: "", type: "receita", status: "Pendente" });
+      setShowTxForm(false);
+      await loadTransactions(selected.id);
+    } finally {
+      setSavingTx(false);
+    }
+  }
+
+  async function handleConfirmTx(id: number) {
+    setConfirmingTxId(id);
+    try {
+      await transactionsApi.setStatus(id, "Confirmado");
+      if (selected) await loadTransactions(selected.id);
+    } finally {
+      setConfirmingTxId(null);
+    }
+  }
+
+  const realReceita = transactions.filter((t) => t.type === "receita" && t.status === "Confirmado").reduce((a, t) => a + Number(t.value), 0);
+  const realDespesa = transactions.filter((t) => t.type === "despesa" && t.status === "Confirmado").reduce((a, t) => a + Number(t.value), 0);
+  const realSaldo = realReceita - realDespesa;
 
   const loadPlatforms = useCallback(async () => {
     setLoading(true);
@@ -326,6 +376,90 @@ export function Platforms() {
                     <span className="text-xs font-mono truncate max-w-[60%]" style={{ color: "var(--muted-foreground)" }}>{url as string}</span>
                   </div>
                 ))}
+              </div>
+
+              <div>
+                <div className="flex items-center gap-1.5 text-xs font-semibold mb-2" style={{ color: "var(--foreground)" }}>
+                  <TrendingUp size={13} />Performance
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg p-3" style={{ background: "var(--muted)" }}>
+                    <div className="text-xs mb-0.5" style={{ color: "var(--muted-foreground)" }}>Margem estimada/mês</div>
+                    <div className="text-sm font-bold" style={{ color: selected.revenue - selected.costs >= 0 ? "#10B981" : "#EF4444" }}>
+                      R$ {(selected.revenue - selected.costs).toLocaleString("pt-BR")}
+                    </div>
+                  </div>
+                  <div className="rounded-lg p-3" style={{ background: "var(--muted)" }}>
+                    <div className="text-xs mb-0.5" style={{ color: "var(--muted-foreground)" }}>Receita por usuário</div>
+                    <div className="text-sm font-bold" style={{ color: "var(--foreground)" }}>
+                      {selected.users > 0 ? `R$ ${(selected.revenue / selected.users).toFixed(2)}` : "—"}
+                    </div>
+                  </div>
+                </div>
+                <p className="text-xs mt-1.5" style={{ color: "var(--muted-foreground)" }}>Baseado nos valores de "Receita" e "Custos" cadastrados acima (estimativa manual).</p>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold" style={{ color: "var(--foreground)" }}>
+                    <DollarSign size={13} />Financeiro real (lançamentos)
+                  </div>
+                  <button onClick={() => setShowTxForm((v) => !v)} className="text-xs px-2 py-1 rounded-md font-semibold" style={{ background: "var(--muted)", color: "var(--foreground)" }}>
+                    {showTxForm ? "Fechar" : "+ Lançamento"}
+                  </button>
+                </div>
+                <div className="grid grid-cols-3 gap-2 mb-3">
+                  <div className="rounded-lg p-2 text-center" style={{ background: "var(--muted)" }}>
+                    <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>Recebido</div>
+                    <div className="text-sm font-bold" style={{ color: "#10B981" }}>R$ {realReceita.toLocaleString("pt-BR")}</div>
+                  </div>
+                  <div className="rounded-lg p-2 text-center" style={{ background: "var(--muted)" }}>
+                    <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>Gasto</div>
+                    <div className="text-sm font-bold" style={{ color: "#EF4444" }}>R$ {realDespesa.toLocaleString("pt-BR")}</div>
+                  </div>
+                  <div className="rounded-lg p-2 text-center" style={{ background: "var(--muted)" }}>
+                    <div className="text-xs" style={{ color: "var(--muted-foreground)" }}>Saldo</div>
+                    <div className="text-sm font-bold" style={{ color: realSaldo >= 0 ? "#10B981" : "#EF4444" }}>R$ {realSaldo.toLocaleString("pt-BR")}</div>
+                  </div>
+                </div>
+
+                {showTxForm && (
+                  <div className="rounded-lg border p-3 space-y-2 mb-3" style={{ borderColor: "var(--border)", background: "var(--muted)" }}>
+                    <div className="grid grid-cols-2 gap-2">
+                      <input placeholder="Descrição" value={txForm.description} onChange={(e) => setTxForm({ ...txForm, description: e.target.value })} className="px-2 py-1.5 rounded-md text-xs border outline-none" style={{ background: "var(--card)", borderColor: "var(--border)", color: "var(--foreground)" }} />
+                      <input type="number" placeholder="Valor (R$)" value={txForm.value} onChange={(e) => setTxForm({ ...txForm, value: e.target.value })} className="px-2 py-1.5 rounded-md text-xs border outline-none" style={{ background: "var(--card)", borderColor: "var(--border)", color: "var(--foreground)" }} />
+                      <select value={txForm.type} onChange={(e) => setTxForm({ ...txForm, type: e.target.value })} className="px-2 py-1.5 rounded-md text-xs border outline-none" style={{ background: "var(--card)", borderColor: "var(--border)", color: "var(--foreground)" }}>
+                        <option value="receita">Receita</option><option value="despesa">Despesa</option>
+                      </select>
+                      <select value={txForm.status} onChange={(e) => setTxForm({ ...txForm, status: e.target.value })} className="px-2 py-1.5 rounded-md text-xs border outline-none" style={{ background: "var(--card)", borderColor: "var(--border)", color: "var(--foreground)" }}>
+                        <option>Pendente</option><option>Confirmado</option>
+                      </select>
+                    </div>
+                    <button onClick={handleSaveTx} disabled={savingTx || !txForm.description.trim() || !txForm.value} className="text-xs px-3 py-1.5 rounded-md font-semibold disabled:opacity-50 flex items-center gap-1.5" style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}>
+                      {savingTx && <Loader2 size={11} className="animate-spin" />}Salvar
+                    </button>
+                  </div>
+                )}
+
+                {txLoading && <div className="text-xs flex items-center gap-2" style={{ color: "var(--muted-foreground)" }}><Loader2 size={11} className="animate-spin" />Carregando...</div>}
+                <div className="space-y-1.5">
+                  {transactions.map((t) => (
+                    <div key={t.id} className="flex items-center gap-2 p-2 rounded-lg border text-xs" style={{ borderColor: "var(--border)" }}>
+                      <div className="flex-1 min-w-0 truncate" style={{ color: "var(--foreground)" }}>{t.description}</div>
+                      <span className="font-bold flex-shrink-0" style={{ color: t.type === "receita" ? "#10B981" : "#EF4444" }}>
+                        {t.type === "receita" ? "+" : "-"}R$ {Number(t.value).toLocaleString("pt-BR")}
+                      </span>
+                      {t.status !== "Confirmado" && (
+                        <button onClick={() => handleConfirmTx(t.id)} disabled={confirmingTxId === t.id} title="Confirmar" className="flex-shrink-0" style={{ color: "#10B981" }}>
+                          {confirmingTxId === t.id ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                  {!txLoading && transactions.length === 0 && (
+                    <div className="text-xs text-center py-3" style={{ color: "var(--muted-foreground)" }}>Nenhum lançamento vinculado ainda.</div>
+                  )}
+                </div>
               </div>
             </div>
           </div>

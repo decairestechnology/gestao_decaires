@@ -17,7 +17,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     case "transactions": {
       if (req.method === "GET") {
         const rows = await sql`
-          SELECT id, date, description, category, project_id, client, type, value, payment_method, status,
+          SELECT id, date, description, category, project_id, platform_id, client, type, value, payment_method, status,
                  is_recurring, recurring_source_id, created_at
           FROM financial_transactions ORDER BY date DESC, created_at DESC
         `;
@@ -32,15 +32,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const [updated] = await sql`
             UPDATE financial_transactions SET
               description = COALESCE(${f.description ?? null}, description),
-              category = ${f.category ?? null},
-              client = ${f.client ?? null},
+              category = COALESCE(${f.category ?? null}, category),
+              client = COALESCE(${f.client ?? null}, client),
               type = COALESCE(${f.type ?? null}, type),
               value = COALESCE(${f.value ?? null}, value),
-              payment_method = ${f.payment_method ?? null},
+              payment_method = COALESCE(${f.payment_method ?? null}, payment_method),
               date = COALESCE(${f.date ?? null}, date),
+              project_id = COALESCE(${f.project_id ?? null}, project_id),
+              platform_id = COALESCE(${f.platform_id ?? null}, platform_id),
               is_recurring = COALESCE(${f.is_recurring ?? null}, is_recurring)
             WHERE id = ${body.id}
-            RETURNING id, date, description, category, project_id, client, type, value, payment_method, status, is_recurring, recurring_source_id, created_at
+            RETURNING id, date, description, category, project_id, platform_id, client, type, value, payment_method, status, is_recurring, recurring_source_id, created_at
           `;
           if (!updated) return res.status(404).json({ error: "Lançamento não encontrado" });
           return res.status(200).json(updated);
@@ -51,7 +53,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const [updated] = await sql`
           UPDATE financial_transactions SET status = ${newStatus}
           WHERE id = ${txId}
-          RETURNING id, date, description, category, project_id, client, type, value, payment_method, status, is_recurring, recurring_source_id, created_at
+          RETURNING id, date, description, category, project_id, platform_id, client, type, value, payment_method, status, is_recurring, recurring_source_id, created_at
         `;
         if (!updated) return res.status(404).json({ error: "Lançamento não encontrado" });
         return res.status(200).json(updated);
@@ -62,14 +64,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         await sql`DELETE FROM financial_transactions WHERE id = ${txId}`;
         return res.status(204).end();
       }
-      const { description, category, client, type: txType, value, payment_method, date, project_id, status: txStatus, is_recurring, recurring_source_id } = req.body ?? {};
+      const { description, category, client, type: txType, value, payment_method, date, project_id, platform_id, status: txStatus, is_recurring, recurring_source_id } = req.body ?? {};
       if (!description || !txType || value === undefined) {
         return res.status(400).json({ error: "Descrição, tipo e valor são obrigatórios" });
       }
       const [tx] = await sql`
-        INSERT INTO financial_transactions (date, description, category, client, type, value, payment_method, status, project_id, is_recurring, recurring_source_id)
-        VALUES (${date || new Date().toISOString().slice(0, 10)}, ${description}, ${category ?? null}, ${client ?? null}, ${txType}, ${value}, ${payment_method ?? null}, ${txStatus || "Pendente"}, ${project_id ?? null}, ${is_recurring ?? false}, ${recurring_source_id ?? null})
-        RETURNING id, date, description, category, project_id, client, type, value, payment_method, status, is_recurring, recurring_source_id, created_at
+        INSERT INTO financial_transactions (date, description, category, client, type, value, payment_method, status, project_id, platform_id, is_recurring, recurring_source_id)
+        VALUES (${date || new Date().toISOString().slice(0, 10)}, ${description}, ${category ?? null}, ${client ?? null}, ${txType}, ${value}, ${payment_method ?? null}, ${txStatus || "Pendente"}, ${project_id ?? null}, ${platform_id ?? null}, ${is_recurring ?? false}, ${recurring_source_id ?? null})
+        RETURNING id, date, description, category, project_id, platform_id, client, type, value, payment_method, status, is_recurring, recurring_source_id, created_at
       `;
       return res.status(201).json(tx);
     }
@@ -91,12 +93,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             UPDATE agenda_events SET
               title = COALESCE(${f.title ?? null}, title),
               date = COALESCE(${f.date ?? null}, date),
-              start_time = ${f.start_time ?? null},
-              end_time = ${f.end_time ?? null},
-              location = ${f.location ?? null},
-              description = ${f.description ?? null},
+              start_time = COALESCE(${f.start_time ?? null}, start_time),
+              end_time = COALESCE(${f.end_time ?? null}, end_time),
+              location = COALESCE(${f.location ?? null}, location),
+              description = COALESCE(${f.description ?? null}, description),
               type = COALESCE(${f.type ?? null}, type),
-              project_id = ${f.project_id ?? null}
+              project_id = COALESCE(${f.project_id ?? null}, project_id)
             WHERE id = ${body.id}
             RETURNING id, title, date, start_time, end_time, location, description, project_id, responsible_name, status, type, created_at
           `;
@@ -174,11 +176,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const found = await sql`
             UPDATE goals SET
               title = COALESCE(${f.title ?? null}, title),
-              description = ${f.description ?? null},
-              deadline = ${f.deadline ?? null},
+              description = COALESCE(${f.description ?? null}, description),
+              deadline = COALESCE(${f.deadline ?? null}, deadline),
               priority = COALESCE(${f.priority ?? null}, priority),
-              category = ${f.category ?? null},
-              project_id = ${f.project_id ?? null},
+              category = COALESCE(${f.category ?? null}, category),
+              project_id = COALESCE(${f.project_id ?? null}, project_id),
               status = COALESCE(${f.status ?? null}, status)
             WHERE id = ${goalId} RETURNING id
           `;
@@ -284,9 +286,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const [updated] = await sql`
             UPDATE knowledge_articles SET
               title = COALESCE(${f.title ?? null}, title),
-              content = ${f.content ?? null},
-              category_id = ${f.category_id ?? null},
-              project_id = ${f.project_id ?? null},
+              content = COALESCE(${f.content ?? null}, content),
+              category_id = COALESCE(${f.category_id ?? null}, category_id),
+              project_id = COALESCE(${f.project_id ?? null}, project_id),
               updated_at = now()
             WHERE id = ${body.id}
             RETURNING id
@@ -402,18 +404,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const found = await sql`
             UPDATE platforms SET
               name = COALESCE(${f.name ?? null}, name),
-              logo_emoji = ${f.logo_emoji ?? null},
-              description = ${f.description ?? null},
-              category = ${f.category ?? null},
+              logo_emoji = COALESCE(${f.logo_emoji ?? null}, logo_emoji),
+              description = COALESCE(${f.description ?? null}, description),
+              category = COALESCE(${f.category ?? null}, category),
               status = COALESCE(${f.status ?? null}, status),
-              launch_date = ${f.launch_date ?? null},
+              launch_date = COALESCE(${f.launch_date ?? null}, launch_date),
               users_count = COALESCE(${f.users_count ?? null}, users_count),
               revenue = COALESCE(${f.revenue ?? null}, revenue),
               monthly_costs = COALESCE(${f.monthly_costs ?? null}, monthly_costs),
-              public_link = ${f.public_link ?? null},
-              repo_link = ${f.repo_link ?? null},
-              prod_link = ${f.prod_link ?? null},
-              staging_link = ${f.staging_link ?? null}
+              public_link = COALESCE(${f.public_link ?? null}, public_link),
+              repo_link = COALESCE(${f.repo_link ?? null}, repo_link),
+              prod_link = COALESCE(${f.prod_link ?? null}, prod_link),
+              staging_link = COALESCE(${f.staging_link ?? null}, staging_link)
             WHERE id = ${body.id} RETURNING id
           `;
           if (found.length === 0) return res.status(404).json({ error: "Plataforma não encontrada" });
@@ -485,12 +487,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const found = await sql`
             UPDATE content_posts SET
               title = COALESCE(${f.title ?? null}, title),
-              caption = ${f.caption ?? null},
-              platform = ${f.platform ?? null},
-              type = ${f.type ?? null},
-              scheduled_date = ${f.scheduled_date ?? null},
+              caption = COALESCE(${f.caption ?? null}, caption),
+              platform = COALESCE(${f.platform ?? null}, platform),
+              type = COALESCE(${f.type ?? null}, type),
+              scheduled_date = COALESCE(${f.scheduled_date ?? null}, scheduled_date),
               status = COALESCE(${f.status ?? null}, status),
-              cta = ${f.cta ?? null}
+              cta = COALESCE(${f.cta ?? null}, cta)
             WHERE id = ${body.id} RETURNING id
           `;
           if (found.length === 0) return res.status(404).json({ error: "Conteúdo não encontrado" });
@@ -633,6 +635,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       res.setHeader("Allow", "GET, PATCH");
       return res.status(405).json({ error: "Método não permitido" });
+    }
+
+    case "all-deadlines": {
+      if (req.method !== "GET") {
+        res.setHeader("Allow", "GET");
+        return res.status(405).json({ error: "Método não permitido" });
+      }
+      const projectDeadlines = await sql`
+        SELECT id, name AS title, deadline AS date, status FROM projects
+        WHERE deadline IS NOT NULL AND status NOT IN ('Concluído', 'Cancelado')
+      `;
+      const goalDeadlines = await sql`
+        SELECT id, title, deadline AS date, status FROM goals
+        WHERE deadline IS NOT NULL AND status NOT IN ('Concluída', 'Cancelada')
+      `;
+      const contentDeadlines = await sql`
+        SELECT id, title, scheduled_date AS date, status FROM content_posts
+        WHERE scheduled_date IS NOT NULL AND status NOT IN ('Publicado', 'Cancelado')
+      `;
+      return res.status(200).json({
+        projects: projectDeadlines,
+        goals: goalDeadlines,
+        content: contentDeadlines,
+      });
     }
 
     default:

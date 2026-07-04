@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { ChevronLeft, ChevronRight, Plus, X, Loader2, Pencil, Trash2, CheckCircle2 } from "lucide-react";
-import { eventsApi, projectsApi, type AgendaEvent as ApiEvent, type Project } from "../../lib/api";
+import { eventsApi, projectsApi, fetchAllDeadlines, type AgendaEvent as ApiEvent, type Project, type AllDeadlines } from "../../lib/api";
 
 type ViewMode = "mensal" | "semanal" | "diário" | "lista";
 
@@ -8,7 +8,37 @@ const eventTypes = ["Reunião", "Prazo", "Lembrete", "Tarefa", "Apresentação",
 const typeColors: Record<string, string> = {
   Reunião: "#06B6D4", Prazo: "#EF4444", Lembrete: "#F59E0B", Tarefa: "#7C3AED",
   Apresentação: "#7C3AED", Evento: "#10B981", "Contato com cliente": "#06B6D4",
+  "Prazo de Projeto": "#EF4444", "Prazo de Meta": "#F59E0B", "Publicação de Conteúdo": "#7C3AED",
 };
+
+function buildAutoEvents(deadlines: AllDeadlines): UiEvent[] {
+  const mk = (idOffset: number, type: string, source: "project" | "goal" | "content", note: string) =>
+    (rows: { id: number; title: string; date: string; status: string }[]) =>
+      rows.filter((r) => r.date).map((r) => ({
+        id: idOffset + r.id,
+        title: r.title,
+        date: r.date.slice(0, 10),
+        time: "—",
+        end: "—",
+        location: "—",
+        description: "",
+        participants: [],
+        project: "—",
+        projectId: null,
+        responsible: "—",
+        status: r.status,
+        type,
+        isAuto: true,
+        autoSource: source,
+        autoNote: note,
+      } as UiEvent));
+
+  return [
+    ...mk(1_000_000, "Prazo de Projeto", "project", "Esse prazo vem do módulo Projetos. Pra mudar a data, edite o projeto lá.")(deadlines.projects ?? []),
+    ...mk(2_000_000, "Prazo de Meta", "goal", "Esse prazo vem do módulo Metas. Pra mudar a data, edite a meta lá.")(deadlines.goals ?? []),
+    ...mk(3_000_000, "Publicação de Conteúdo", "content", "Essa data vem do módulo Conteúdo. Pra mudar, edite o conteúdo lá.")(deadlines.content ?? []),
+  ];
+}
 
 interface UiEvent {
   id: number;
@@ -24,6 +54,9 @@ interface UiEvent {
   responsible: string;
   status: string;
   type: string;
+  isAuto?: boolean;
+  autoSource?: "project" | "goal" | "content";
+  autoNote?: string;
 }
 
 function toUiEvent(e: ApiEvent): UiEvent {
@@ -185,6 +218,7 @@ export function Agenda() {
   const [selected, setSelected] = useState<UiEvent | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [events, setEvents] = useState<UiEvent[]>([]);
+  const [autoEvents, setAutoEvents] = useState<UiEvent[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -208,10 +242,22 @@ export function Agenda() {
     }
   }, []);
 
+  const loadAutoEvents = useCallback(async () => {
+    try {
+      const deadlines = await fetchAllDeadlines();
+      setAutoEvents(buildAutoEvents(deadlines));
+    } catch {
+      // silencioso — se falhar, a agenda ainda mostra os eventos normais
+    }
+  }, []);
+
   useEffect(() => {
     loadEvents();
+    loadAutoEvents();
     projectsApi.list().then(setProjects).catch(() => {});
-  }, [loadEvents]);
+  }, [loadEvents, loadAutoEvents]);
+
+  const allEvents = [...events, ...autoEvents];
 
   function projectName(id: number | null) {
     if (!id) return "—";
@@ -341,21 +387,25 @@ export function Agenda() {
 
       {view === "mensal" && (
         <div className="rounded-xl border shadow-sm p-5" style={{ background: "var(--card)", borderColor: "var(--border)" }}>
-          <CalendarGrid year={year} month={month} events={events} onSelect={openEvent} />
+          <CalendarGrid year={year} month={month} events={allEvents} onSelect={openEvent} />
         </div>
       )}
 
       {view === "lista" && (
         <div className="space-y-3">
-          {events.sort((a, b) => a.date.localeCompare(b.date)).map((e) => (
+          {allEvents.sort((a, b) => a.date.localeCompare(b.date)).map((e) => (
             <div key={e.id} onClick={() => openEvent(e)}
               className="rounded-xl border p-4 shadow-sm cursor-pointer hover:shadow-md transition-all flex items-center gap-4"
               style={{ background: "var(--card)", borderColor: "var(--border)" }}>
               <div className="w-1 self-stretch rounded-full flex-shrink-0" style={{ background: typeColors[e.type] }} />
               <div className="flex-1 min-w-0">
-                <div className="font-semibold text-sm" style={{ color: "var(--foreground)" }}>{e.title}</div>
+                <div className="font-semibold text-sm flex items-center gap-1.5" style={{ color: "var(--foreground)" }}>
+                  {e.isAuto && <span title="Puxado automaticamente de outro módulo">🔗</span>}
+                  {e.title}
+                </div>
                 <div className="text-xs mt-0.5" style={{ color: "var(--muted-foreground)" }}>
-                  {new Date(e.date + "T00:00:00").toLocaleDateString("pt-BR")} · {e.time}–{e.end} · {e.location}
+                  {new Date(e.date + "T00:00:00").toLocaleDateString("pt-BR")}
+                  {!e.isAuto && ` · ${e.time}–${e.end} · ${e.location}`}
                 </div>
               </div>
               <span className="text-xs px-2 py-0.5 rounded-full font-medium flex-shrink-0" style={{ background: `${typeColors[e.type]}20`, color: typeColors[e.type] }}>{e.type}</span>
@@ -365,11 +415,11 @@ export function Agenda() {
       )}
 
       {view === "semanal" && (
-        <WeekView referenceDate={referenceDate} events={events} onSelect={openEvent} />
+        <WeekView referenceDate={referenceDate} events={allEvents} onSelect={openEvent} />
       )}
 
       {view === "diário" && (
-        <DayView referenceDate={referenceDate} events={events} onSelect={openEvent} />
+        <DayView referenceDate={referenceDate} events={allEvents} onSelect={openEvent} />
       )}
 
       {/* Event Detail */}
@@ -382,15 +432,25 @@ export function Agenda() {
                 <h3 className="font-bold mt-1" style={{ color: "var(--foreground)" }}>{selected.title}</h3>
               </div>
               <div className="flex items-center gap-1 flex-shrink-0">
-                <button onClick={() => openEditModal(selected)} title="Editar" className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "var(--muted-foreground)" }}>
-                  <Pencil size={14} />
-                </button>
-                <button onClick={() => setConfirmDelete(true)} title="Excluir" className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "#EF4444" }}>
-                  <Trash2 size={14} />
-                </button>
+                {!selected.isAuto && (
+                  <>
+                    <button onClick={() => openEditModal(selected)} title="Editar" className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "var(--muted-foreground)" }}>
+                      <Pencil size={14} />
+                    </button>
+                    <button onClick={() => setConfirmDelete(true)} title="Excluir" className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "#EF4444" }}>
+                      <Trash2 size={14} />
+                    </button>
+                  </>
+                )}
                 <button onClick={() => setSelected(null)} className="w-8 h-8 rounded-lg flex items-center justify-center transition-colors hover:bg-muted" style={{ color: "var(--muted-foreground)" }}><X size={16} /></button>
               </div>
             </div>
+
+            {selected.isAuto && (
+              <div className="px-6 py-3 text-xs" style={{ background: "var(--muted)", color: "var(--muted-foreground)" }}>
+                🔗 {selected.autoNote}
+              </div>
+            )}
 
             {confirmDelete && (
               <div className="px-6 py-3 flex items-center justify-between gap-3" style={{ background: "#FEF2F2" }}>
@@ -434,7 +494,7 @@ export function Agenda() {
                 </div>
               </div>
             </div>
-            {selected.status !== "Confirmado" && (
+            {!selected.isAuto && selected.status !== "Confirmado" && (
               <div className="px-6 pb-6">
                 <button
                   onClick={handleConfirmStatus}

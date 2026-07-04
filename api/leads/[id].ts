@@ -62,14 +62,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const [updated] = await sql`
         UPDATE crm_leads SET
           name = COALESCE(${f.name ?? null}, name),
-          company = ${f.company ?? null},
-          phone = ${f.phone ?? null},
-          email = ${f.email ?? null},
-          origin = ${f.origin ?? null},
-          interest = ${f.interest ?? null},
+          company = COALESCE(${f.company ?? null}, company),
+          phone = COALESCE(${f.phone ?? null}, phone),
+          email = COALESCE(${f.email ?? null}, email),
+          origin = COALESCE(${f.origin ?? null}, origin),
+          interest = COALESCE(${f.interest ?? null}, interest),
           value = COALESCE(${f.value ?? null}, value),
-          next_action = ${f.next_action ?? null},
-          description = ${f.description ?? null},
+          next_action = COALESCE(${f.next_action ?? null}, next_action),
+          description = COALESCE(${f.description ?? null}, description),
           updated_at = now()
         WHERE id = ${id}
         RETURNING id, name, company, phone, email, origin, interest, value, responsible_name, last_contact, next_action, stage, description, created_at

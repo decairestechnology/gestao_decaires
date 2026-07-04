@@ -9,6 +9,7 @@ const statusColors: Record<string, { bg: string; text: string }> = {
   Aprovado: { bg: "#ECFDF5", text: "#065F46" },
   Agendado: { bg: "#F5F3FF", text: "#7C3AED" },
   Publicado: { bg: "#E0F9FF", text: "#0E7490" },
+  Cancelado: { bg: "#FEF2F2", text: "#991B1B" },
 };
 
 const platformColors: Record<string, string> = {

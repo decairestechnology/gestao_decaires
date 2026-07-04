@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Plus, Download, TrendingUp, TrendingDown, Wallet, AlertCircle, X, Loader2, Trash2, BarChart3, LineChart as LineChartIcon, CheckCircle2, Pencil } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { transactionsApi, type Transaction as ApiTransaction } from "../../lib/api";
+import { transactionsApi, platformsApi, type Transaction as ApiTransaction, type Platform } from "../../lib/api";
 
 const EXPENSE_COLORS = ["#7C3AED", "#06B6D4", "#F59E0B", "#10B981", "#EF4444", "#8B5CF6", "#94A3B8"];
 const MONTH_LABELS = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
@@ -19,6 +19,7 @@ interface UiTransaction {
   status: string;
   isRecurring: boolean;
   recurringSourceId: number | null;
+  platformId: number | null;
 }
 
 function toUiTransaction(t: ApiTransaction): UiTransaction {
@@ -35,6 +36,7 @@ function toUiTransaction(t: ApiTransaction): UiTransaction {
     status: t.status,
     isRecurring: !!t.is_recurring,
     recurringSourceId: t.recurring_source_id,
+    platformId: t.platform_id,
   };
 }
 
@@ -76,7 +78,7 @@ function PieBreakdown({ title, data, emptyText }: { title: string; data: { name:
   );
 }
 
-const emptyForm = { description: "", value: "", category: "", date: "", payment_method: "Transferência", is_recurring: false };
+const emptyForm = { description: "", value: "", category: "", date: "", payment_method: "Transferência", is_recurring: false, platform_id: "" };
 
 export function Financial() {
   const [showModal, setShowModal] = useState<"receita" | "despesa" | null>(null);
@@ -92,6 +94,7 @@ export function Financial() {
   const [confirmingId, setConfirmingId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [generatingRecurring, setGeneratingRecurring] = useState(false);
+  const [platforms, setPlatforms] = useState<Platform[]>([]);
 
   const loadTransactions = useCallback(async () => {
     setLoading(true);
@@ -108,16 +111,18 @@ export function Financial() {
 
   useEffect(() => {
     loadTransactions();
+    platformsApi.list().then(setPlatforms).catch(() => {});
   }, [loadTransactions]);
 
   async function handleSaveTransaction() {
     if (!showModal || !form.description.trim() || !form.value) return;
     setSaving(true);
     try {
+      const payload = { ...form, type: showModal, value: Number(form.value), platform_id: form.platform_id ? Number(form.platform_id) : null };
       if (editingId) {
-        await transactionsApi.update(editingId, { ...form, type: showModal, value: Number(form.value) } as any);
+        await transactionsApi.update(editingId, payload as any);
       } else {
-        await transactionsApi.create({ ...form, type: showModal, value: Number(form.value) });
+        await transactionsApi.create(payload);
       }
       setForm(emptyForm);
       setShowModal(null);
@@ -139,6 +144,7 @@ export function Financial() {
       date: t.rawDate ? t.rawDate.slice(0, 10) : "",
       payment_method: t.payment === "—" ? "Transferência" : t.payment,
       is_recurring: t.isRecurring,
+      platform_id: t.platformId ? String(t.platformId) : "",
     });
     setShowModal(t.type as "receita" | "despesa");
   }
@@ -563,6 +569,18 @@ export function Financial() {
                   style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
                 >
                   {["Transferência", "Pix", "Cartão", "Boleto", "Dinheiro"].map(p => <option key={p}>{p}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold mb-1.5" style={{ color: "var(--foreground)" }}>Plataforma / Produto (opcional)</label>
+                <select
+                  value={form.platform_id}
+                  onChange={(e) => setForm({ ...form, platform_id: e.target.value })}
+                  className="w-full px-3 py-2 rounded-lg text-sm border outline-none"
+                  style={{ background: "var(--muted)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                >
+                  <option value="">Nenhuma</option>
+                  {platforms.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               </div>
               <label className="flex items-center gap-2 text-sm cursor-pointer" style={{ color: "var(--foreground)" }}>

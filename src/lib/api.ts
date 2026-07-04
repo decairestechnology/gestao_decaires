@@ -129,6 +129,7 @@ export interface Transaction {
   description: string;
   category: string | null;
   project_id: number | null;
+  platform_id: number | null;
   client: string | null;
   type: string;
   value: string;
@@ -300,6 +301,14 @@ export const userSettingsApi = {
     return handleResponse(res);
   },
 };
+
+export interface DeadlineRow { id: number; title: string; date: string; status: string }
+export interface AllDeadlines { projects: DeadlineRow[]; goals: DeadlineRow[]; content: DeadlineRow[] }
+
+export async function fetchAllDeadlines(): Promise<AllDeadlines> {
+  const res = await fetch("/api/resources/all-deadlines", { headers: await authHeaders() });
+  return handleResponse(res);
+}
 
 function makeResource<T = any>(type: string) {
   return {
