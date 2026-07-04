@@ -618,8 +618,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           INSERT INTO company_settings (id, name, cnpj, sector, email, website, address, logo_url, updated_at)
           VALUES (1, ${name ?? null}, ${cnpj ?? null}, ${sector ?? null}, ${email ?? null}, ${website ?? null}, ${address ?? null}, ${logo_url ?? null}, now())
           ON CONFLICT (id) DO UPDATE SET
-            name = ${name ?? null}, cnpj = ${cnpj ?? null}, sector = ${sector ?? null},
-            email = ${email ?? null}, website = ${website ?? null}, address = ${address ?? null},
+            name = COALESCE(${name ?? null}, company_settings.name),
+            cnpj = COALESCE(${cnpj ?? null}, company_settings.cnpj),
+            sector = COALESCE(${sector ?? null}, company_settings.sector),
+            email = COALESCE(${email ?? null}, company_settings.email),
+            website = COALESCE(${website ?? null}, company_settings.website),
+            address = COALESCE(${address ?? null}, company_settings.address),
             logo_url = COALESCE(${logo_url ?? null}, company_settings.logo_url), updated_at = now()
         `;
         const [row] = await sql`SELECT name, cnpj, sector, email, website, address, logo_url FROM company_settings WHERE id = 1`;
