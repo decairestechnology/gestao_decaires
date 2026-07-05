@@ -378,10 +378,41 @@ export function Agenda() {
       )}
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3 mb-6">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button onClick={prevMonth} className="w-8 h-8 rounded-lg border flex items-center justify-center transition-colors hover:bg-muted" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}><ChevronLeft size={14} /></button>
-          <span className="text-sm font-bold min-w-[140px] text-center" style={{ color: "var(--foreground)" }}>{headerLabel}</span>
+
+          {view === "mensal" ? (
+            <>
+              <select
+                value={month}
+                onChange={(e) => setMonth(Number(e.target.value))}
+                className="text-sm font-bold px-2 py-1.5 rounded-lg border outline-none"
+                style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}
+              >
+                {months.map((m, i) => <option key={m} value={i}>{m}</option>)}
+              </select>
+              <select
+                value={year}
+                onChange={(e) => setYear(Number(e.target.value))}
+                className="text-sm font-bold px-2 py-1.5 rounded-lg border outline-none"
+                style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}
+              >
+                {Array.from({ length: 11 }, (_, i) => today.getFullYear() - 5 + i).map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </>
+          ) : (
+            <span className="text-sm font-bold min-w-[140px] text-center" style={{ color: "var(--foreground)" }}>{headerLabel}</span>
+          )}
+
           <button onClick={nextMonth} className="w-8 h-8 rounded-lg border flex items-center justify-center transition-colors hover:bg-muted" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}><ChevronRight size={14} /></button>
+
+          <button
+            onClick={() => { setYear(today.getFullYear()); setMonth(today.getMonth()); setReferenceDate(today); }}
+            className="text-xs px-3 py-1.5 rounded-lg font-semibold border transition-colors hover:bg-muted"
+            style={{ borderColor: "var(--border)", color: "var(--foreground)" }}
+          >
+            Hoje
+          </button>
         </div>
         <div className="flex items-center gap-1 rounded-lg border p-1" style={{ borderColor: "var(--border)", background: "var(--card)" }}>
           {(["mensal", "semanal", "diário", "lista"] as ViewMode[]).map((v) => (
