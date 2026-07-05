@@ -119,8 +119,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             UPDATE agenda_events SET
               title = COALESCE(${f.title ?? null}, title),
               date = COALESCE(${f.date ?? null}, date),
-              start_time = COALESCE(${f.start_time ?? null}, start_time),
-              end_time = COALESCE(${f.end_time ?? null}, end_time),
+              start_time = COALESCE(${f.start_time || null}, start_time),
+              end_time = COALESCE(${f.end_time || null}, end_time),
               location = COALESCE(${f.location ?? null}, location),
               description = COALESCE(${f.description ?? null}, description),
               type = COALESCE(${f.type ?? null}, type),
