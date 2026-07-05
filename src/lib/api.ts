@@ -309,6 +309,20 @@ export const userSettingsApi = {
 export interface DeadlineRow { id: number; title: string; date: string; status: string }
 export interface AllDeadlines { projects: DeadlineRow[]; goals: DeadlineRow[]; content: DeadlineRow[] }
 
+export interface ScoutMessage {
+  role: "user" | "assistant";
+  content: any;
+}
+
+export async function scoutChat(messages: ScoutMessage[]): Promise<{ text: string; messages: ScoutMessage[] }> {
+  const res = await fetch("/api/resources/scout-chat", {
+    method: "POST",
+    headers: await authHeaders(),
+    body: JSON.stringify({ messages }),
+  });
+  return handleResponse(res);
+}
+
 export async function fetchAllDeadlines(): Promise<AllDeadlines> {
   const res = await fetch("/api/resources/all-deadlines", { headers: await authHeaders() });
   return handleResponse(res);

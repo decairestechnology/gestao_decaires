@@ -3,10 +3,36 @@ import { sql } from "../_lib/db.js";
 import { verifyAuth, niceName } from "../_lib/auth.js";
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const type = String(req.query.type ?? "");
+
+  // A Scout externa (fora do sistema, sem login) usa uma chave de API própria em vez do Firebase.
+  if (type === "scout-ingest") {
+    if (req.method !== "POST") {
+      res.setHeader("Allow", "POST");
+      return res.status(405).json({ error: "Método não permitido" });
+    }
+    const key = req.headers["x-scout-key"];
+    if (!key || key !== process.env.SCOUT_API_KEY) {
+      return res.status(401).json({ error: "Chave de API inválida" });
+    }
+    const { name, email, phone, company, interest, value, conversation_summary } = req.body ?? {};
+    if (!name) return res.status(400).json({ error: "Nome é obrigatório" });
+
+    const [lead] = await sql`
+      INSERT INTO crm_leads (name, company, phone, email, interest, value, origin, responsible_name, last_contact, stage)
+      VALUES (${name}, ${company ?? null}, ${phone ?? null}, ${email ?? null}, ${interest ?? null}, ${value ?? 0}, 'Scout', 'Scout AI', CURRENT_DATE, 'new')
+      RETURNING id, name
+    `;
+    await sql`
+      INSERT INTO scout_leads (crm_lead_id, name, email, phone, conversation_summary, source)
+      VALUES (${lead.id}, ${name}, ${email ?? null}, ${phone ?? null}, ${conversation_summary ?? null}, 'Scout')
+    `;
+    await sql`INSERT INTO crm_lead_activities (lead_id, note, author_name) VALUES (${lead.id}, 'Lead capturado automaticamente pela Scout', 'Scout AI')`;
+    return res.status(201).json({ success: true, lead_id: lead.id });
+  }
+
   const user = await verifyAuth(req.headers.authorization);
   if (!user) return res.status(401).json({ error: "Não autenticado" });
-
-  const type = String(req.query.type ?? "");
 
   if (req.method !== "GET" && req.method !== "POST" && req.method !== "PATCH" && req.method !== "DELETE") {
     res.setHeader("Allow", "GET, POST, PATCH, DELETE");
@@ -746,6 +772,117 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ...todayEvents.map((e: any) => ({ id: `ev-${e.id}`, text: `Compromisso hoje: "${e.title}"${e.start_time ? ` às ${String(e.start_time).slice(0, 5)}` : ""}`, color: "#06B6D4", page: "agenda" })),
       ];
       return res.status(200).json(items);
+    }
+
+    case "scout-chat": {
+      if (req.method !== "POST") {
+        res.setHeader("Allow", "POST");
+        return res.status(405).json({ error: "Método não permitido" });
+      }
+      if (!process.env.ANTHROPIC_API_KEY) {
+        return res.status(500).json({ error: "A Scout ainda não foi configurada (falta a chave da Anthropic)." });
+      }
+
+      const { messages } = req.body ?? {};
+      if (!Array.isArray(messages) || messages.length === 0) {
+        return res.status(400).json({ error: "messages é obrigatório" });
+      }
+
+      const SYSTEM_PROMPT = `Você é a Scout, assistente virtual da DeCaires Technology dentro do sistema de gestão interno.
+Ajude a equipe a cadastrar leads, consultar informações rápidas do negócio e tirar dúvidas sobre como usar o sistema.
+Seja direta, simpática e concisa. Responda em português do Brasil.
+Quando alguém descrever um lead/cliente em potencial, use a ferramenta create_lead pra cadastrar de verdade.
+Quando perguntarem sobre números do negócio (quantos projetos, leads, receita do mês), use get_summary.`;
+
+      const tools = [
+        {
+          name: "create_lead",
+          description: "Cadastra um novo lead no CRM do sistema.",
+          input_schema: {
+            type: "object",
+            properties: {
+              name: { type: "string", description: "Nome da pessoa ou empresa" },
+              company: { type: "string" },
+              phone: { type: "string" },
+              email: { type: "string" },
+              interest: { type: "string", description: "O que a pessoa precisa/quer" },
+              value: { type: "number", description: "Valor estimado do negócio em reais" },
+            },
+            required: ["name"],
+          },
+        },
+        {
+          name: "get_summary",
+          description: "Retorna um resumo com números atuais do negócio (projetos, leads, receita do mês).",
+          input_schema: { type: "object", properties: {} },
+        },
+      ];
+
+      async function executeTool(name: string, input: any) {
+        if (name === "create_lead") {
+          const responsibleName = niceName(user);
+          const [lead] = await sql`
+            INSERT INTO crm_leads (name, company, phone, email, interest, value, origin, responsible_name, last_contact, stage)
+            VALUES (${input.name}, ${input.company ?? null}, ${input.phone ?? null}, ${input.email ?? null}, ${input.interest ?? null}, ${input.value ?? 0}, 'Scout (chat interno)', ${responsibleName}, CURRENT_DATE, 'new')
+            RETURNING id, name
+          `;
+          await sql`INSERT INTO crm_lead_activities (lead_id, note, author_name) VALUES (${lead.id}, 'Lead cadastrado via chat com a Scout', ${responsibleName})`;
+          return { success: true, lead_id: lead.id, message: `Lead "${lead.name}" cadastrado com sucesso no CRM.` };
+        }
+        if (name === "get_summary") {
+          const [p] = await sql`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status = 'Atrasado')::int AS atrasados FROM projects`;
+          const [l] = await sql`SELECT COUNT(*)::int AS total, COUNT(*) FILTER (WHERE stage = 'negotiation')::int AS negociacao FROM crm_leads`;
+          const [f] = await sql`SELECT COALESCE(SUM(value) FILTER (WHERE type = 'receita'), 0)::float AS receita FROM financial_transactions WHERE date >= date_trunc('month', CURRENT_DATE)`;
+          return { projetos_total: p.total, projetos_atrasados: p.atrasados, leads_total: l.total, leads_em_negociacao: l.negociacao, receita_mes: f.receita };
+        }
+        return { error: "Ferramenta desconhecida" };
+      }
+
+      let conversation = [...messages];
+      let finalText = "";
+
+      for (let round = 0; round < 3; round++) {
+        const anthropicRes = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "x-api-key": process.env.ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "claude-sonnet-5",
+            max_tokens: 1024,
+            system: SYSTEM_PROMPT,
+            tools,
+            messages: conversation,
+          }),
+        });
+
+        if (!anthropicRes.ok) {
+          const errBody = await anthropicRes.text();
+          return res.status(502).json({ error: `Erro ao falar com a Scout: ${errBody.slice(0, 200)}` });
+        }
+
+        const data: any = await anthropicRes.json();
+        const toolUses = (data.content ?? []).filter((c: any) => c.type === "tool_use");
+
+        if (toolUses.length === 0) {
+          finalText = (data.content ?? []).filter((c: any) => c.type === "text").map((c: any) => c.text).join("\n");
+          conversation.push({ role: "assistant", content: data.content });
+          break;
+        }
+
+        conversation.push({ role: "assistant", content: data.content });
+        const toolResults = [];
+        for (const tu of toolUses) {
+          const result = await executeTool(tu.name, tu.input);
+          toolResults.push({ type: "tool_result", tool_use_id: tu.id, content: JSON.stringify(result) });
+        }
+        conversation.push({ role: "user", content: toolResults });
+      }
+
+      if (!finalText) finalText = "Desculpa, não consegui terminar de processar isso agora. Pode tentar de novo?";
+      return res.status(200).json({ text: finalText, messages: conversation });
     }
 
     default:

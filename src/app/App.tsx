@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { MobileNav } from "./components/MobileNav";
+import { ScoutChat } from "./components/ScoutChat";
 import { Dashboard } from "./components/Dashboard";
 import { Projects } from "./components/Projects";
 import { Ideas } from "./components/Ideas";
@@ -140,6 +141,7 @@ export default function App() {
         </main>
         {/* Mobile bottom nav */}
         <MobileNav currentPage={currentPage} onNavigate={setCurrentPage} />
+        <ScoutChat />
       </div>
     </div>
   );
