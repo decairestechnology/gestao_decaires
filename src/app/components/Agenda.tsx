@@ -11,13 +11,25 @@ const typeColors: Record<string, string> = {
   "Prazo de Projeto": "#EF4444", "Prazo de Meta": "#F59E0B", "Publicação de Conteúdo": "#7C3AED",
 };
 
+function normalizeDateStr(d: unknown): string {
+  if (!d) return "";
+  if (typeof d === "string") return d.slice(0, 10);
+  // Fallback pra quando o driver do banco devolve um objeto Date em vez de string
+  const dt = new Date(d as any);
+  if (isNaN(dt.getTime())) return "";
+  return fmtLocalDate(dt);
+}
+
 function buildAutoEvents(deadlines: AllDeadlines): UiEvent[] {
   const mk = (idOffset: number, type: string, source: "project" | "goal" | "content", note: string) =>
     (rows: { id: number; title: string; date: string; status: string }[]) =>
-      rows.filter((r) => r.date).map((r) => ({
+      rows
+        .map((r) => ({ ...r, date: normalizeDateStr(r.date) }))
+        .filter((r) => r.date)
+        .map((r) => ({
         id: idOffset + r.id,
         title: r.title,
-        date: r.date.slice(0, 10),
+        date: r.date,
         time: "—",
         end: "—",
         location: "—",
@@ -63,7 +75,7 @@ function toUiEvent(e: ApiEvent): UiEvent {
   return {
     id: e.id,
     title: e.title,
-    date: e.date ? e.date.slice(0, 10) : "", // normaliza, a API pode devolver com ou sem horário junto
+    date: normalizeDateStr(e.date), // normaliza, a API pode devolver formatos diferentes de data
     time: e.start_time ? e.start_time.slice(0, 5) : "—",
     end: e.end_time ? e.end_time.slice(0, 5) : "—",
     location: e.location ?? "—",

@@ -820,7 +820,7 @@ Quando perguntarem sobre números do negócio (quantos projetos, leads, receita 
 
       async function executeTool(name: string, input: any) {
         if (name === "create_lead") {
-          const responsibleName = niceName(user);
+          const responsibleName = niceName(user!);
           const [lead] = await sql`
             INSERT INTO crm_leads (name, company, phone, email, interest, value, origin, responsible_name, last_contact, stage)
             VALUES (${input.name}, ${input.company ?? null}, ${input.phone ?? null}, ${input.email ?? null}, ${input.interest ?? null}, ${input.value ?? 0}, 'Scout (chat interno)', ${responsibleName}, CURRENT_DATE, 'new')

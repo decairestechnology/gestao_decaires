@@ -113,6 +113,9 @@ function ProjectDetail({ project, onClose, onUpdated, onDeleted }: ProjectDetail
   const [tasksLoading, setTasksLoading] = useState(true);
   const [newTask, setNewTask] = useState({ title: "", priority: "Média", due_date: "" });
   const [savingTask, setSavingTask] = useState(false);
+  const [editingTaskId, setEditingTaskId] = useState<number | null>(null);
+  const [editTaskForm, setEditTaskForm] = useState({ title: "", priority: "Média", due_date: "" });
+  const [savingTaskEdit, setSavingTaskEdit] = useState(false);
 
   const [savingResponsible, setSavingResponsible] = useState(false);
 
@@ -236,6 +239,22 @@ function ProjectDetail({ project, onClose, onUpdated, onDeleted }: ProjectDetail
       const p = fresh.find((x) => x.id === project.id);
       if (p) onUpdated(toUiProject(p));
     } catch (e: any) { setError(e?.message ?? "Não foi possível excluir a tarefa."); }
+  }
+
+  function openEditTask(task: ProjectTask) {
+    setEditingTaskId(task.id);
+    setEditTaskForm({ title: task.title, priority: task.priority, due_date: task.due_date ? task.due_date.slice(0, 10) : "" });
+  }
+
+  async function handleSaveTaskEdit(taskId: number) {
+    if (!editTaskForm.title.trim()) return;
+    setSavingTaskEdit(true);
+    try {
+      await projectTasksApi.update(project.id, taskId, editTaskForm);
+      setEditingTaskId(null);
+      await loadTasks();
+    } catch (e: any) { setError(e?.message ?? "Não foi possível salvar a tarefa."); }
+    finally { setSavingTaskEdit(false); }
   }
 
   async function handleSetResponsible(name: string) {
@@ -497,13 +516,51 @@ function ProjectDetail({ project, onClose, onUpdated, onDeleted }: ProjectDetail
 
               <div className="space-y-2">
                 {tasks.map((t) => (
-                  <div key={t.id} className="flex items-center gap-3 p-3 rounded-xl border transition-colors hover:bg-muted" style={{ borderColor: "var(--border)" }}>
-                    <input type="checkbox" checked={t.done} onChange={() => handleToggleTask(t)} className="w-4 h-4 rounded flex-shrink-0" style={{ accentColor: "var(--primary)" }} />
-                    <span className="flex-1 text-sm" style={{ color: t.done ? "var(--muted-foreground)" : "var(--foreground)", textDecoration: t.done ? "line-through" : "none" }}>{t.title}</span>
-                    {t.due_date && <span className="text-xs flex-shrink-0" style={{ color: "var(--muted-foreground)" }}>{new Date(t.due_date + "T00:00:00").toLocaleDateString("pt-BR")}</span>}
-                    <span className="text-xs px-2 py-0.5 rounded-full font-bold flex-shrink-0" style={{ background: `${priorityColors[t.priority]}15`, color: priorityColors[t.priority] }}>{t.priority}</span>
-                    <button onClick={() => handleDeleteTask(t.id)} className="flex-shrink-0" style={{ color: "var(--muted-foreground)" }}><Trash2 size={13} /></button>
-                  </div>
+                  editingTaskId === t.id ? (
+                    <div key={t.id} className="flex flex-col sm:flex-row gap-2 p-3 rounded-xl border" style={{ borderColor: "var(--primary)", background: "var(--muted)" }}>
+                      <input
+                        value={editTaskForm.title}
+                        onChange={(e) => setEditTaskForm({ ...editTaskForm, title: e.target.value })}
+                        className="flex-1 px-2 py-1.5 rounded-lg text-sm border outline-none"
+                        style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                      />
+                      <input
+                        type="date"
+                        value={editTaskForm.due_date}
+                        onChange={(e) => setEditTaskForm({ ...editTaskForm, due_date: e.target.value })}
+                        className="px-2 py-1.5 rounded-lg text-sm border outline-none"
+                        style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                      />
+                      <select
+                        value={editTaskForm.priority}
+                        onChange={(e) => setEditTaskForm({ ...editTaskForm, priority: e.target.value })}
+                        className="px-2 py-1.5 rounded-lg text-sm border outline-none"
+                        style={{ background: "var(--card)", color: "var(--foreground)", borderColor: "var(--border)" }}
+                      >
+                        <option>Alta</option><option>Média</option><option>Baixa</option>
+                      </select>
+                      <div className="flex gap-1.5 flex-shrink-0">
+                        <button onClick={() => setEditingTaskId(null)} className="px-2.5 py-1.5 rounded-lg text-xs font-bold border" style={{ borderColor: "var(--border)", color: "var(--foreground)" }}>Cancelar</button>
+                        <button
+                          onClick={() => handleSaveTaskEdit(t.id)}
+                          disabled={savingTaskEdit || !editTaskForm.title.trim()}
+                          className="px-2.5 py-1.5 rounded-lg text-xs font-bold disabled:opacity-50 flex items-center gap-1"
+                          style={{ background: "var(--primary)", color: "var(--primary-foreground)" }}
+                        >
+                          {savingTaskEdit && <Loader2 size={11} className="animate-spin" />}Salvar
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div key={t.id} className="flex items-center gap-3 p-3 rounded-xl border transition-colors hover:bg-muted" style={{ borderColor: "var(--border)" }}>
+                      <input type="checkbox" checked={t.done} onChange={() => handleToggleTask(t)} className="w-4 h-4 rounded flex-shrink-0" style={{ accentColor: "var(--primary)" }} />
+                      <span className="flex-1 text-sm" style={{ color: t.done ? "var(--muted-foreground)" : "var(--foreground)", textDecoration: t.done ? "line-through" : "none" }}>{t.title}</span>
+                      {t.due_date && <span className="text-xs flex-shrink-0" style={{ color: "var(--muted-foreground)" }}>{new Date(t.due_date.slice(0, 10) + "T00:00:00").toLocaleDateString("pt-BR")}</span>}
+                      <span className="text-xs px-2 py-0.5 rounded-full font-bold flex-shrink-0" style={{ background: `${priorityColors[t.priority]}15`, color: priorityColors[t.priority] }}>{t.priority}</span>
+                      <button onClick={() => openEditTask(t)} className="flex-shrink-0" style={{ color: "var(--muted-foreground)" }}><Pencil size={13} /></button>
+                      <button onClick={() => handleDeleteTask(t.id)} className="flex-shrink-0" style={{ color: "var(--muted-foreground)" }}><Trash2 size={13} /></button>
+                    </div>
+                  )
                 ))}
                 {!tasksLoading && tasks.length === 0 && (
                   <div className="text-xs text-center py-6" style={{ color: "var(--muted-foreground)" }}>Nenhuma tarefa ainda. Adicione a primeira acima.</div>
