@@ -12,6 +12,7 @@ import { Financial } from "./components/Financial";
 import { Agenda } from "./components/Agenda";
 import { Platforms } from "./components/Platforms";
 import { Content } from "./components/Content";
+import { SocialMedia } from "./components/SocialMedia";
 import { Knowledge } from "./components/Knowledge";
 import { Goals } from "./components/Goals";
 import { Reports } from "./components/Reports";
@@ -23,11 +24,11 @@ import { applyAccentColor } from "../lib/theme";
 
 export type Page =
   | "dashboard" | "projects" | "ideas" | "crm" | "financial" | "agenda"
-  | "platforms" | "content" | "knowledge" | "goals" | "reports" | "settings";
+  | "platforms" | "content" | "social" | "knowledge" | "goals" | "reports" | "settings";
 
 const VALID_PAGES: Page[] = [
   "dashboard", "projects", "ideas", "crm", "financial", "agenda",
-  "platforms", "content", "knowledge", "goals", "reports", "settings",
+  "platforms", "content", "social", "knowledge", "goals", "reports", "settings",
 ];
 
 function pageFromHash(): Page {
@@ -94,6 +95,7 @@ export default function App() {
       case "agenda": return <Agenda />;
       case "platforms": return <Platforms />;
       case "content": return <Content />;
+      case "social": return <SocialMedia />;
       case "knowledge": return <Knowledge />;
       case "goals": return <Goals />;
       case "reports": return <Reports />;

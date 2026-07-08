@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   LayoutDashboard, FolderKanban, Lightbulb, Users, Wallet, Calendar,
-  Globe, FileText, BookOpen, Target, BarChart3, Settings,
+  Globe, FileText, BookOpen, Target, BarChart3, Settings, Share2,
   ChevronLeft, ChevronRight, LogOut, Sun, Moon, Zap
 } from "lucide-react";
 import type { User as FirebaseUser } from "firebase/auth";
@@ -38,6 +38,7 @@ const navGroups = [
     group: "Conteúdo",
     items: [
       { id: "platforms", label: "Plataformas", icon: Globe },
+      { id: "social", label: "Redes Sociais", icon: Share2 },
       { id: "content", label: "Conteúdo", icon: FileText },
       { id: "knowledge", label: "Conhecimento", icon: BookOpen },
     ],

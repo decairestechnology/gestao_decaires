@@ -342,6 +342,60 @@ export async function fetchNotifications(): Promise<NotificationItem[]> {
   return handleResponse(res);
 }
 
+export interface SocialChannel {
+  id: number;
+  platform: string;
+  handle: string | null;
+  profile_url: string | null;
+  followers_count: number;
+  notes: string | null;
+  responsible_name: string | null;
+  created_at: string;
+}
+
+export interface SocialSnapshot {
+  id: number;
+  channel_id: number;
+  followers_count: number;
+  recorded_at: string;
+}
+
+export const socialChannelsApi = {
+  async list(): Promise<SocialChannel[]> {
+    const res = await fetch("/api/resources/social-channels", { headers: await authHeaders() });
+    return handleResponse(res);
+  },
+  async create(data: { platform: string; handle?: string; profile_url?: string; notes?: string }) {
+    const res = await fetch("/api/resources/social-channels", {
+      method: "POST", headers: await authHeaders(), body: JSON.stringify(data),
+    });
+    return handleResponse(res);
+  },
+  async update(id: number, fields: Partial<SocialChannel>) {
+    const res = await fetch("/api/resources/social-channels", {
+      method: "PATCH", headers: await authHeaders(), body: JSON.stringify({ id, fields }),
+    });
+    return handleResponse(res);
+  },
+  async remove(id: number) {
+    const res = await fetch(`/api/resources/social-channels?id=${id}`, { method: "DELETE", headers: await authHeaders() });
+    await handleResponse(res);
+  },
+};
+
+export const socialSnapshotsApi = {
+  async list(channelId: number): Promise<SocialSnapshot[]> {
+    const res = await fetch(`/api/resources/social-snapshots?channelId=${channelId}`, { headers: await authHeaders() });
+    return handleResponse(res);
+  },
+  async create(channel_id: number, followers_count: number) {
+    const res = await fetch("/api/resources/social-snapshots", {
+      method: "POST", headers: await authHeaders(), body: JSON.stringify({ channel_id, followers_count }),
+    });
+    return handleResponse(res);
+  },
+};
+
 function makeResource<T = any>(type: string) {
   return {
     async list(): Promise<T[]> {

@@ -885,6 +885,71 @@ Quando perguntarem sobre números do negócio (quantos projetos, leads, receita 
       return res.status(200).json({ text: finalText, messages: conversation });
     }
 
+    case "social-channels": {
+      if (req.method === "GET") {
+        const rows = await sql`
+          SELECT id, platform, handle, profile_url, followers_count, notes, responsible_name, created_at
+          FROM social_channels ORDER BY followers_count DESC
+        `;
+        return res.status(200).json(rows);
+      }
+      if (req.method === "PATCH") {
+        const body = req.body ?? {};
+        if (!body.id) return res.status(400).json({ error: "id é obrigatório" });
+        const f = body.fields ?? {};
+        const [updated] = await sql`
+          UPDATE social_channels SET
+            platform = COALESCE(${f.platform ?? null}, platform),
+            handle = COALESCE(${f.handle ?? null}, handle),
+            profile_url = COALESCE(${f.profile_url ?? null}, profile_url),
+            notes = COALESCE(${f.notes ?? null}, notes)
+          WHERE id = ${body.id}
+          RETURNING id, platform, handle, profile_url, followers_count, notes, responsible_name, created_at
+        `;
+        if (!updated) return res.status(404).json({ error: "Canal não encontrado" });
+        return res.status(200).json(updated);
+      }
+      if (req.method === "DELETE") {
+        const chId = Number(req.query.id);
+        if (!chId) return res.status(400).json({ error: "id é obrigatório" });
+        await sql`DELETE FROM social_channels WHERE id = ${chId}`;
+        return res.status(204).end();
+      }
+      const { platform, handle, profile_url, notes } = req.body ?? {};
+      if (!platform) return res.status(400).json({ error: "Rede é obrigatória" });
+      const responsibleName = niceName(user);
+      const [channel] = await sql`
+        INSERT INTO social_channels (platform, handle, profile_url, followers_count, notes, responsible_name)
+        VALUES (${platform}, ${handle ?? null}, ${profile_url ?? null}, 0, ${notes ?? null}, ${responsibleName})
+        RETURNING id, platform, handle, profile_url, followers_count, notes, responsible_name, created_at
+      `;
+      return res.status(201).json(channel);
+    }
+
+    case "social-snapshots": {
+      if (req.method === "GET") {
+        const channelId = Number(req.query.channelId);
+        if (!channelId) return res.status(400).json({ error: "channelId é obrigatório" });
+        const rows = await sql`
+          SELECT id, channel_id, followers_count, recorded_at
+          FROM social_channel_snapshots WHERE channel_id = ${channelId} ORDER BY recorded_at ASC
+        `;
+        return res.status(200).json(rows);
+      }
+      if (req.method === "POST") {
+        const { channel_id, followers_count } = req.body ?? {};
+        if (!channel_id || followers_count === undefined) return res.status(400).json({ error: "channel_id e followers_count são obrigatórios" });
+        const [snap] = await sql`
+          INSERT INTO social_channel_snapshots (channel_id, followers_count) VALUES (${channel_id}, ${followers_count})
+          RETURNING id, channel_id, followers_count, recorded_at
+        `;
+        await sql`UPDATE social_channels SET followers_count = ${followers_count} WHERE id = ${channel_id}`;
+        return res.status(201).json(snap);
+      }
+      res.setHeader("Allow", "GET, POST");
+      return res.status(405).json({ error: "Método não permitido" });
+    }
+
     default:
       return res.status(404).json({ error: `Recurso "${type}" não existe` });
   }
